@@ -30,6 +30,7 @@ import { formatName, formatDate, formatDateOnly, formatDateTime, formatRelativeD
 import { cn } from "@/lib/utils";
 import { QueryError } from "@/components/QueryError";
 import { SequenceTimeline } from "./SequenceTimeline";
+import { deliverySummary, normalizeDeliverySettings } from "./delivery-settings";
 import { STATUS_META, originHint, CampaignStatusControls, type CampaignRow } from "./CampaignCard";
 import {
   smartleadUrl, useCampaignEnrollments, useCampaignEvents, useCampaignEventStats, useSetEnrollmentStatus,
@@ -138,6 +139,17 @@ export function CampaignDetailSheet({
   const statusMeta = STATUS_META[c.status] ?? { label: c.status, className: "" };
   const hint = originHint(c);
   const url = smartleadUrl(c.smartlead_campaign_id);
+  const storedDelivery = c.settings?.delivery && typeof c.settings.delivery === "object"
+    ? c.settings.delivery as Record<string, unknown>
+    : null;
+  const delivery = storedDelivery ? normalizeDeliverySettings({
+    daysOfWeek: Array.isArray(storedDelivery.days_of_week) ? storedDelivery.days_of_week as number[] : undefined,
+    timezone: typeof storedDelivery.timezone === "string" ? storedDelivery.timezone : undefined,
+    startHour: typeof storedDelivery.start_hour === "string" ? storedDelivery.start_hour : undefined,
+    endHour: typeof storedDelivery.end_hour === "string" ? storedDelivery.end_hour : undefined,
+    campaignDailyVolume: Number(storedDelivery.max_new_leads_per_day) || c.leads_per_day,
+    messageSpacingMinutes: Number(storedDelivery.min_time_btw_emails) || undefined,
+  }) : null;
 
   function runEnrollmentAction(e: CampaignEnrollmentRow, action: EnrollmentStatusAction) {
     setEnrollment.mutate(
@@ -180,6 +192,15 @@ export function CampaignDetailSheet({
           </div>
 
           <CampaignStatusControls c={c} setStatus={setStatus} />
+
+          {delivery && (
+            <div className="rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--camp-line)", background: "var(--camp-surface-2)" }}>
+              <span className="font-medium">Delivery:</span>{" "}
+              <span className="text-muted-foreground">
+                {deliverySummary(delivery)} · {delivery.campaignDailyVolume} new people/day · {delivery.messageSpacingMinutes} minute message spacing
+              </span>
+            </div>
+          )}
 
           {/* Live-updates health + on-demand AI (docket I1 + I12). Only for
               Smartlead-linked campaigns — legacy/migrated rows have neither. */}

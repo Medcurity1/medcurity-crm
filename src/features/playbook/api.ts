@@ -542,6 +542,8 @@ export interface InboxHealthEntry {
   } | null;
   campaigns: Array<{ id: string; name: string; leads_per_day: number; status: string }>;
   total_leads_per_day: number;
+  /** Exact Smartlead account signature; null means the account detail read did not expose one. */
+  signature: string | null;
 }
 
 /** Lazy — only fires while `enabled` (the Sending Inboxes dialog is open, or
@@ -560,6 +562,24 @@ export function useInboxHealth(enabled: boolean) {
       return (data?.inboxes ?? []) as InboxHealthEntry[];
     },
     staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function useUpdateEmailAccountSignature() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ emailAccountId, signature }: { emailAccountId: number; signature: string }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "update-email-account-signature", email_account_id: emailAccountId, signature },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { success: true; signature: string };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "inbox-health"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "email-accounts"] });
+    },
   });
 }
 

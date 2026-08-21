@@ -54,6 +54,10 @@ import {
 } from "./campaign-content";
 import { incompleteAutoEmails, recommendedCustomSequence } from "./sequence-authoring";
 import {
+  DEFAULT_DELIVERY_SETTINGS, DELIVERY_DAY_OPTIONS, deliverySummary, normalizeDeliverySettings,
+  type DeliverySettings,
+} from "./delivery-settings";
+import {
   useGenerateCampaign, useSuggestCampaign, useRegenerateEmail, useEmailAccounts, useLaunchCampaign,
   useInboxHealth, useSmartleadStatus, useActiveUsers, useCampaignTemplates, smartleadUrl,
   fetchLatestCampaignDraft, saveCampaignDraft, deleteCampaignDraft,
@@ -148,6 +152,7 @@ interface CampaignDraftState {
   adaptive: boolean;
   leadsPerDay: number;
   minGap: number;
+  delivery?: Partial<DeliverySettings>;
 }
 
 /** Type-guards a campaign_drafts.state_json blob before trusting it — an old
@@ -254,6 +259,11 @@ export function CampaignWizard({
   const [adaptive, setAdaptive] = useState(false);
   const [leadsPerDay, setLeadsPerDay] = useState(25);
   const [minGap, setMinGap] = useState(15);
+  const [sendDays, setSendDays] = useState<number[]>(DEFAULT_DELIVERY_SETTINGS.daysOfWeek);
+  const [sendStart, setSendStart] = useState(DEFAULT_DELIVERY_SETTINGS.startHour);
+  const [sendEnd, setSendEnd] = useState(DEFAULT_DELIVERY_SETTINGS.endHour);
+  const [sendTimezone, setSendTimezone] = useState(DEFAULT_DELIVERY_SETTINGS.timezone);
+  const [advancedDeliveryOpen, setAdvancedDeliveryOpen] = useState(false);
   const [launchResult, setLaunchResult] = useState<{
     id: number; started: boolean; leads: number; failed: number;
     suppressionDropped: number; alreadyEnrolledDropped: number; enrolled: number; tasksCreated: number;
@@ -356,6 +366,14 @@ export function CampaignWizard({
   // action's `Number(...) || 25` treats 0 as unset and would default it
   // straight back to 25.
   const effectiveLeadsPerDay = inboxHeadroom != null ? Math.min(leadsPerDay, Math.max(1, inboxHeadroom)) : leadsPerDay;
+  const deliverySettings = useMemo(() => normalizeDeliverySettings({
+    daysOfWeek: sendDays,
+    startHour: sendStart,
+    endHour: sendEnd,
+    timezone: sendTimezone,
+    campaignDailyVolume: effectiveLeadsPerDay,
+    messageSpacingMinutes: minGap,
+  }), [sendDays, sendStart, sendEnd, sendTimezone, effectiveLeadsPerDay, minGap]);
 
   const rampProjection = useMemo(
     () => (templateSteps.length ? projectSendRamp(templateSteps, effectiveLeadsPerDay, sendableRecipients.length) : null),
@@ -415,7 +433,7 @@ export function CampaignWizard({
     const state: CampaignDraftState = {
       v: 1, mode, flow, customSequence, step, description, campaign, templateName, templateSteps,
       recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
-      autoStart, adaptive, leadsPerDay, minGap,
+      autoStart, adaptive, leadsPerDay, minGap, delivery: deliverySettings,
     };
     const serialized = JSON.stringify(state);
     if (autosaveBaselineRef.current === null) {
@@ -436,7 +454,7 @@ export function CampaignWizard({
     open, launch.isPending, launchResult, hasMeaningfulContent,
     mode, flow, customSequence, step, description, campaign, templateName, templateSteps,
     recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
-    autoStart, adaptive, leadsPerDay, minGap,
+    autoStart, adaptive, leadsPerDay, minGap, deliverySettings,
   ]);
 
   function resumeDraft() {
@@ -459,7 +477,13 @@ export function CampaignWizard({
     setSuppressionOverrides(s.suppressionOverrides); setEnrollmentOverrides(s.enrollmentOverrides);
     setInboxId(s.inboxId); setOwnerId(s.ownerId);
     setAutoStart(s.autoStart); setAdaptive(s.adaptive);
-    setLeadsPerDay(s.leadsPerDay); setMinGap(s.minGap);
+    const delivery = normalizeDeliverySettings(s.delivery ?? {
+      campaignDailyVolume: s.leadsPerDay,
+      messageSpacingMinutes: s.minGap,
+    });
+    setLeadsPerDay(delivery.campaignDailyVolume); setMinGap(delivery.messageSpacingMinutes);
+    setSendDays(delivery.daysOfWeek); setSendStart(delivery.startHour);
+    setSendEnd(delivery.endHour); setSendTimezone(delivery.timezone);
     draftIdRef.current = draftBanner.id;
     setDraftBanner(null);
   }
@@ -601,6 +625,10 @@ export function CampaignWizard({
       toast.error("Choose an available sending inbox before launching.");
       return;
     }
+    if (!deliveryReady) {
+      toast.error("Choose at least one sending day and an end time after the start time.");
+      return;
+    }
     if (!copyReady || !audienceReady) {
       toast.error("Finish every launch-readiness check before launching.");
       return;
@@ -612,7 +640,14 @@ export function CampaignWizard({
       autoStart,
       adaptiveEnabled: adaptive,
       owner_id: ownerId || profile?.id,
-      schedule: { max_new_leads_per_day: effectiveLeadsPerDay, min_time_btw_emails: minGap },
+      schedule: {
+        max_new_leads_per_day: effectiveLeadsPerDay,
+        days_of_week: deliverySettings.daysOfWeek,
+        start_hour: deliverySettings.startHour,
+        end_hour: deliverySettings.endHour,
+        timezone: deliverySettings.timezone,
+        min_time_btw_emails: deliverySettings.messageSpacingMinutes,
+      },
       suppression_overrides: suppressionOverrides,
       enrollment_overrides: enrollmentOverrides,
     };
@@ -690,6 +725,7 @@ export function CampaignWizard({
     : templateEmailSteps.length > 0 && !confirmEmailsIncomplete;
   const audienceReady = !recipientChecksPending && !recipientChecksFailed && sendableRecipients.length > 0;
   const senderReady = !!selectedInbox && inboxHeadroom !== 0;
+  const deliveryReady = sendDays.length > 0 && sendStart < sendEnd;
 
   const stepperSteps = mode === "ai" && !hasLockedRecipients ? ["Build", "People", "Review"] : null;
 
@@ -1216,43 +1252,97 @@ export function CampaignWizard({
                   <div className="camp-card p-4 space-y-2">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <p className="text-sm font-medium">Recommended settings</p>
+                        <p className="text-sm font-medium">Delivery</p>
                         <p className="text-xs text-muted-foreground">
-                          {effectiveLeadsPerDay} people/day · {minGap} min gap · weekdays 9am to 5pm Pacific
-                          {selectedInbox ? ` · ${confirmInboxLabel}` : ""}
+                          {deliverySummary(deliverySettings)} · {effectiveLeadsPerDay} new {effectiveLeadsPerDay === 1 ? "person" : "people"}/day
+                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Recommended defaults are ready to use. Follow-up timing stays with the sequence above.
                         </p>
                       </div>
                       <button type="button" className="camp-btn shrink-0 text-xs" onClick={() => setSettingsOpen((v) => !v)}>
-                        {settingsOpen ? "Done" : "Customize"}
+                        {settingsOpen ? "Done" : "Edit delivery settings"}
                       </button>
                     </div>
                   </div>
                   {settingsOpen && (
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs">New leads per day</Label>
-                      <Input type="number" min={1} max={500} value={leadsPerDay} onChange={(e) => setLeadsPerDay(Math.max(1, Math.min(500, Number(e.target.value) || 25)))} />
+                  <div className="camp-card p-4 space-y-4">
+                    <div className="space-y-2">
+                      <div>
+                        <Label className="text-xs">Sending days</Label>
+                        <p className="text-[11px] text-muted-foreground">Choose the days Pulse may send campaign emails.</p>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {DELIVERY_DAY_OPTIONS.map((day) => {
+                          const active = sendDays.includes(day.value);
+                          return (
+                            <button
+                              key={day.value}
+                              type="button"
+                              aria-pressed={active}
+                              className={cn("camp-btn h-8 min-w-11 text-xs", active && "camp-btn-primary")}
+                              onClick={() => setSendDays((current) => active
+                                ? (current.length > 1 ? current.filter((value) => value !== day.value) : current)
+                                : [...current, day.value])}
+                            >
+                              {day.short}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Start sending at</Label>
+                        <Input type="time" value={sendStart} onChange={(e) => setSendStart(e.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Stop sending at</Label>
+                        <Input type="time" value={sendEnd} onChange={(e) => setSendEnd(e.target.value)} />
+                      </div>
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">Minutes between emails</Label>
-                      <Input type="number" min={1} max={120} value={minGap} onChange={(e) => setMinGap(Math.max(1, Math.min(120, Number(e.target.value) || 15)))} />
+                      <Label className="text-xs">Timezone</Label>
+                      <Select value={sendTimezone} onValueChange={setSendTimezone}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="America/Los_Angeles">Pacific time</SelectItem>
+                          <SelectItem value="America/Denver">Mountain time</SelectItem>
+                          <SelectItem value="America/Chicago">Central time</SelectItem>
+                          <SelectItem value="America/New_York">Eastern time</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Campaign daily volume</Label>
+                      <Input type="number" min={1} max={500} value={leadsPerDay} onChange={(e) => setLeadsPerDay(Math.max(1, Math.min(500, Number(e.target.value) || 25)))} />
+                      <p className="text-[11px] text-muted-foreground">How many new people this campaign may begin with each day. The selected mailbox's safety limit still wins.</p>
+                    </div>
+                    <button type="button" className="camp-btn w-fit text-xs" onClick={() => setAdvancedDeliveryOpen((v) => !v)} aria-expanded={advancedDeliveryOpen}>
+                      {advancedDeliveryOpen ? "Hide advanced" : "Advanced delivery"}
+                    </button>
+                    {advancedDeliveryOpen && (
+                      <div className="space-y-1 rounded-xl border p-3" style={{ borderColor: "var(--camp-line)", background: "var(--camp-surface-2)" }}>
+                        <Label className="text-xs">Spacing between individual messages</Label>
+                        <div className="flex items-center gap-2">
+                          <Input className="max-w-28" type="number" min={1} max={120} value={minGap} onChange={(e) => setMinGap(Math.max(1, Math.min(120, Number(e.target.value) || 15)))} />
+                          <span className="text-xs text-muted-foreground">minutes minimum</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">A deliverability safeguard inside a sending window. This is not the delay between follow-ups; that cadence is set in the sequence.</p>
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Campaign owner</Label>
+                      <Select value={ownerId} onValueChange={setOwnerId}>
+                        <SelectTrigger><SelectValue placeholder="Pick an owner…" /></SelectTrigger>
+                        <SelectContent>
+                          {(activeUsers ?? []).map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name ?? u.id}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">Tasks and reply alerts go to each person's owner. This covers people without one.</p>
                     </div>
                   </div>
                   )}
-                  {settingsOpen && <p className="text-xs text-muted-foreground">Weekdays, 9am to 5pm Pacific.</p>}
-
-                  {settingsOpen && <div className="space-y-1">
-                    <Label className="text-xs">Campaign owner</Label>
-                    <Select value={ownerId} onValueChange={setOwnerId}>
-                      <SelectTrigger><SelectValue placeholder="Pick an owner…" /></SelectTrigger>
-                      <SelectContent>
-                        {(activeUsers ?? []).map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name ?? u.id}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      Tasks and reply alerts go to each person's owner. This covers people without one.
-                    </p>
-                  </div>}
 
                   <div className="space-y-1">
                     <Label className="text-xs">Sending inbox</Label>
@@ -1284,6 +1374,29 @@ export function CampaignWizard({
                         That's more than this inbox has room for. The launch will be capped at {inboxHeadroom} new {inboxHeadroom === 1 ? "person" : "people"}/day.
                       </p>
                     ) : null}
+                    {selectedInboxHealth && (
+                      <div className="mt-2 rounded-xl border p-3 space-y-2" style={{ borderColor: "var(--camp-line)", background: "var(--camp-surface-2)" }}>
+                        <div className="flex items-center gap-2">
+                          <Signature className="h-4 w-4 text-muted-foreground" />
+                          <div>
+                            <p className="text-xs font-medium">Signature from {confirmInboxLabel}</p>
+                            <p className="text-[11px] text-muted-foreground">Smartlead adds this account signature when it sends.</p>
+                          </div>
+                        </div>
+                        {selectedInboxHealth.signature == null ? (
+                          <p className="text-xs text-muted-foreground">Smartlead did not return a signature for this inbox. Review it in Sending inboxes before launch.</p>
+                        ) : selectedInboxHealth.signature.trim() ? (
+                          <iframe
+                            title={`Signature preview for ${confirmInboxLabel}`}
+                            sandbox=""
+                            srcDoc={emailSrcDoc(selectedInboxHealth.signature)}
+                            className="h-24 w-full rounded-lg border bg-white"
+                          />
+                        ) : (
+                          <p className="text-xs text-muted-foreground">This Smartlead inbox currently has no signature.</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div
                     className="inline-flex rounded-full p-1 w-fit border"
@@ -1342,6 +1455,11 @@ export function CampaignWizard({
                               : "Reconnect Smartlead before Pulse can create or start this campaign."}
                       />
                       <ReadinessRow
+                        ready={deliveryReady}
+                        label="Delivery schedule"
+                        detail={deliveryReady ? deliverySummary(deliverySettings) : "Choose at least one sending day and an end time after the start time."}
+                      />
+                      <ReadinessRow
                         ready={senderReady}
                         label="Sending inbox"
                         detail={!selectedInbox
@@ -1365,7 +1483,7 @@ export function CampaignWizard({
                     {!hasLockedRecipients && (
                       <Button variant="ghost" onClick={() => setStep(2)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
                     )}
-                    <button type="button" className="camp-btn-primary" onClick={() => setConfirmOpen(true)} disabled={launch.isPending || !copyReady || !audienceReady || !senderReady || smartleadDisabled}>
+                    <button type="button" className="camp-btn-primary" onClick={() => setConfirmOpen(true)} disabled={launch.isPending || !copyReady || !audienceReady || !deliveryReady || !senderReady || smartleadDisabled}>
                       {launch.isPending ? <><Loader2 className="h-4 w-4 animate-spin" /> Launching…</> : <><Rocket className="h-4 w-4" /> {autoStart ? "Launch campaign" : "Save draft"}</>}
                     </button>
                   </div>
@@ -1395,6 +1513,8 @@ export function CampaignWizard({
                 </p>
                 <p>{autoStart ? "Sending starts immediately after launch." : "Saves as a Pulse draft. Nothing sends until you press Start on the campaign card."}</p>
                 <p>{effectiveLeadsPerDay} new {effectiveLeadsPerDay === 1 ? "person" : "people"}/day</p>
+                <p>{deliverySummary(deliverySettings)}</p>
+                <p>Follow-up cadence comes from the sequence; individual sends are spaced at least {minGap} minutes apart.</p>
                 {confirmEmailsIncomplete && (
                   <p className="text-amber-600">Some emails are missing wording. Fix them before launching.</p>
                 )}
@@ -1403,7 +1523,7 @@ export function CampaignWizard({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={smartleadDisabled || !copyReady || !audienceReady || !senderReady || launch.isPending} onClick={doLaunch}>
+            <AlertDialogAction disabled={smartleadDisabled || !copyReady || !audienceReady || !deliveryReady || !senderReady || launch.isPending} onClick={doLaunch}>
               {autoStart
                 ? `Launch to ${sendableRecipients.length} ${sendableRecipients.length === 1 ? "person" : "people"}`
                 : `Save draft for ${sendableRecipients.length} ${sendableRecipients.length === 1 ? "person" : "people"}`}

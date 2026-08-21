@@ -43,6 +43,7 @@ import {
   fetchCampaignAnalytics,
   fetchCampaignSequences,
   fetchEmailAccounts,
+  fetchEmailAccountById,
   buildSmartleadMetrics,
   mapSmartleadStatus,
 } from "../_shared/smartlead.ts";
@@ -2087,6 +2088,15 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
             failed: leadsFailed,
             failed_emails: failedUploadEmails.slice(0, 200),
           },
+          delivery: {
+            days_of_week: sendDays,
+            timezone: p.schedule?.timezone ?? "America/Los_Angeles",
+            start_hour: p.schedule?.start_hour ?? "09:00",
+            end_hour: p.schedule?.end_hour ?? "17:00",
+            min_time_btw_emails: p.schedule?.min_time_btw_emails ?? 15,
+            max_new_leads_per_day: maxNewLeadsPerDay,
+          },
+          sender: { email_account_id: p.email_account_id ?? null },
         },
       })
       .select("id")
@@ -2412,6 +2422,24 @@ interface InboxHealthEntry {
   warmup: InboxHealthWarmup | null;
   campaigns: InboxHealthCampaignSummary[];
   total_leads_per_day: number;
+  signature: string | null;
+}
+
+function extractAccountSignature(account: Record<string, unknown>): string | null {
+  for (const key of ["signature", "email_signature", "account_signature"]) {
+    const value = account[key];
+    if (typeof value === "string") return value;
+  }
+  return null;
+}
+
+function unwrapEmailAccountDetail(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null) return null;
+  const row = value as Record<string, unknown>;
+  for (const key of ["data", "email_account", "account"]) {
+    if (typeof row[key] === "object" && row[key] !== null) return row[key] as Record<string, unknown>;
+  }
+  return row;
 }
 
 // firstNumber lives in _shared/smartlead-sync.ts (extracted 2026-07-31,
@@ -2540,7 +2568,16 @@ async function inboxHealth(): Promise<{ inboxes: InboxHealthEntry[] }> {
     const key = String(a.id);
     const campaigns = campaignsByInbox.get(key) ?? [];
     const totalLeadsPerDay = campaigns.reduce((sum, c) => sum + (c.leads_per_day || 0), 0);
-    const warmup = Number.isFinite(id) ? await fetchInboxWarmup(id) : null;
+    const [warmup, accountDetail] = Number.isFinite(id)
+      ? await Promise.all([
+        fetchInboxWarmup(id),
+        fetchEmailAccountById(id).catch((err) => {
+          console.warn(`inbox-health: account detail fetch failed for ${id} (signature unavailable):`, (err as Error).message);
+          return null;
+        }),
+      ])
+      : [null, null];
+    const detailedAccount = unwrapEmailAccountDetail(accountDetail) ?? a;
     return {
       id,
       from_email: typeof a.from_email === "string" ? a.from_email : null,
@@ -2549,10 +2586,28 @@ async function inboxHealth(): Promise<{ inboxes: InboxHealthEntry[] }> {
       warmup,
       campaigns,
       total_leads_per_day: totalLeadsPerDay,
+      signature: extractAccountSignature(detailedAccount),
     };
   }));
 
   return { inboxes };
+}
+
+async function updateEmailAccountSignature(emailAccountId: unknown, signature: unknown): Promise<{ success: true; signature: string }> {
+  const id = Number(emailAccountId);
+  if (!Number.isInteger(id) || id <= 0) throw new Error("Choose a valid sending inbox.");
+  if (typeof signature !== "string") throw new Error("Signature must be text or HTML.");
+  if (signature.length > 20_000) throw new Error("Signature is too long (20,000 character limit).");
+  await smartleadFetch(`/email-accounts/${id}`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ signature }),
+  });
+  const refreshed = await fetchEmailAccountById(id);
+  const row = unwrapEmailAccountDetail(refreshed) ?? {};
+  const actual = extractAccountSignature(row);
+  if (actual !== signature) throw new Error("Smartlead did not confirm the updated signature. Refresh and try again.");
+  return { success: true, signature: actual };
 }
 
 // ============================================================
@@ -3705,6 +3760,9 @@ Deno.serve(async (req) => {
     if (action === "refresh") return json(await refreshSmartlead());
     if (action === "daily-sweep") return json(await runDailySweepWithLog());
     if (action === "inbox-health") return json(await inboxHealth());
+    if (action === "update-email-account-signature") {
+      return json(await updateEmailAccountSignature(body.email_account_id, body.signature));
+    }
     if (action === "launch") return json(await launch(body as unknown as LaunchInput, callerCtx));
     if (action === "set-campaign-status") {
       // Reuse the uid already fetched for a rep caller above; an admin/
