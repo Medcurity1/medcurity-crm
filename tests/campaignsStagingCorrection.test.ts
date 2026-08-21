@@ -192,4 +192,12 @@ describe("Campaigns visual system (Aurora, rebuilt 8/19)", () => {
       }
     }
   });
+
+  it("keeps campaign details in the centered Aurora dialog system, not the legacy side sheet", () => {
+    const detail = read("src/features/playbook/CampaignDetailSheet.tsx");
+    expect(detail).toMatch(/<Dialog open=\{open\}/);
+    expect(detail).toMatch(/DialogContent className="camp-scope camp-shell/);
+    expect(detail).toMatch(/sm:max-w-6xl/);
+    expect(detail).not.toMatch(/<Sheet|SheetContent|side="right"/);
+  });
 });
