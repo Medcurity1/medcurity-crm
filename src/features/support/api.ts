@@ -4,6 +4,9 @@ import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import type { SupportConversation, SupportMessage } from "./types";
 
+export type SupportHistoryFilter = "all" | "today" | "week" | "human" | "ended" | "open";
+export const SUPPORT_HISTORY_PAGE_SIZE = 50;
+
 // Meddy Support (platform Coach escalations) — data layer.
 //
 // Reads go straight to the support_* tables (staff-read RLS). ALL writes go
@@ -65,6 +68,89 @@ export function useSupportConversation(id: string | null) {
   });
 }
 
+/** Durable Platform archive. Unlike the live queue this is paged, so ended
+ * conversations never become undiscoverable when the recent list fills up. */
+export function useSupportHistory(
+  filter: SupportHistoryFilter,
+  search: string,
+  page: number,
+) {
+  return useQuery({
+    queryKey: ["support-history", filter, search, page],
+    queryFn: async () => {
+      let q = supabase.from("support_conversations").select(CONV_SELECT);
+      if (filter === "today") {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        q = q.gte("created_at", start.toISOString());
+      } else if (filter === "week") {
+        q = q.gte("created_at", new Date(Date.now() - 7 * 86_400_000).toISOString());
+      } else if (filter === "human") {
+        q = q.or("human_requested_at.not.is.null,taken_over_at.not.is.null");
+      } else if (filter === "ended") {
+        q = q.eq("status", "closed");
+      } else if (filter === "open") {
+        q = q.eq("status", "active");
+      }
+
+      const term = search.trim();
+      if (term) {
+        const esc = term.replace(/[\\%_]/g, (ch) => `\\${ch}`).replace(/[,()]/g, "");
+        q = q.or(
+          `customer_name.ilike.%${esc}%,customer_email.ilike.%${esc}%,customer_company.ilike.%${esc}%`,
+        );
+      }
+
+      const from = page * SUPPORT_HISTORY_PAGE_SIZE;
+      const { data, error } = await q
+        .eq("last.is_internal", false)
+        .neq("last.role", "system")
+        .order("updated_at", { ascending: false })
+        .order("created_at", { ascending: false, referencedTable: "last" })
+        .limit(1, { referencedTable: "last" })
+        .range(from, from + SUPPORT_HISTORY_PAGE_SIZE - 1);
+      if (error) throw error;
+      return (data ?? []) as unknown as SupportConversation[];
+    },
+  });
+}
+
+export type SupportStats = {
+  conversations: number;
+  messages: number;
+  humanRequests: number;
+  takeovers: number;
+};
+
+export function useSupportStats() {
+  return useQuery<SupportStats>({
+    queryKey: ["support-stats"],
+    queryFn: async () => {
+      const [conversations, messages, humanRequests, takeovers] = await Promise.all([
+        supabase.from("support_conversations").select("id", { count: "exact", head: true }),
+        supabase.from("support_messages").select("id", { count: "exact", head: true }),
+        supabase
+          .from("support_conversations")
+          .select("id", { count: "exact", head: true })
+          .not("human_requested_at", "is", null),
+        supabase
+          .from("support_conversations")
+          .select("id", { count: "exact", head: true })
+          .not("taken_over_at", "is", null),
+      ]);
+      for (const result of [conversations, messages, humanRequests, takeovers]) {
+        if (result.error) throw result.error;
+      }
+      return {
+        conversations: conversations.count ?? 0,
+        messages: messages.count ?? 0,
+        humanRequests: humanRequests.count ?? 0,
+        takeovers: takeovers.count ?? 0,
+      };
+    },
+  });
+}
+
 export function useSupportMessages(conversationId: string | null) {
   return useQuery({
     queryKey: ["support-messages", conversationId],
@@ -101,6 +187,8 @@ export function useSupportRealtime(onCustomerMessage?: (conversationId: string) 
         { event: "*", schema: "public", table: "support_conversations" },
         () => {
           qc.invalidateQueries({ queryKey: ["support-conversations"] });
+          qc.invalidateQueries({ queryKey: ["support-history"] });
+          qc.invalidateQueries({ queryKey: ["support-stats"] });
         },
       )
       .on(
@@ -113,6 +201,8 @@ export function useSupportRealtime(onCustomerMessage?: (conversationId: string) 
             if (row.role === "customer") cbRef.current?.(row.conversation_id);
           }
           qc.invalidateQueries({ queryKey: ["support-conversations"] });
+          qc.invalidateQueries({ queryKey: ["support-history"] });
+          qc.invalidateQueries({ queryKey: ["support-stats"] });
         },
       )
       .subscribe();

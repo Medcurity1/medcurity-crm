@@ -12,6 +12,7 @@ import {
 } from "@/lib/notification-sounds";
 import { celebrateHighFive } from "@/lib/confetti";
 import { notificationForDisplay } from "@/features/notifications/notification-display";
+import { notificationTarget } from "@/features/notifications/notification-target";
 
 /**
  * The notification delivery engine — banners, sounds, and OS
@@ -61,10 +62,24 @@ function rememberSeen(set: Set<string>, id: string) {
   }
 }
 
-function showOsNotification(title: string, body: string, tag: string, urgent: boolean, silent = true) {
+function showOsNotification(
+  title: string,
+  body: string,
+  tag: string,
+  urgent: boolean,
+  silent = true,
+  link?: string | null,
+) {
   try {
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-    new Notification(title, { body, tag, requireInteraction: urgent, silent });
+    const notification = new Notification(title, { body, tag, requireInteraction: urgent, silent });
+    if (link) {
+      notification.onclick = () => {
+        window.focus();
+        window.location.assign(link);
+        notification.close();
+      };
+    }
   } catch {
     // some browsers require a service worker — in-app toast still covers it
   }
@@ -146,12 +161,7 @@ export function useNotificationToasts() {
       const bannerOn = prefs[key] !== false;
       const soundOn = prefs[`sound_${key}`] !== false;
       const urgent = URGENT_TYPES.has(key);
-      const link =
-        n.conversation_id && key.startsWith("meddy_")
-          ? `/meddy?conversation=${n.conversation_id}`
-          : n.conversation_id && key.startsWith("support_")
-            ? `/support?conversation=${n.conversation_id}`
-            : n.link;
+      const link = notificationTarget(n);
       const durVal = Number(prefs[`duration_${key}`] ?? DEFAULT_DURATIONS[key] ?? 5);
       const resolvedSound = resolveNotifSound(key, prefs[`soundtype_${key}`] as string | undefined);
 
@@ -160,7 +170,7 @@ export function useNotificationToasts() {
       }
       if (document.hidden) {
         if (bannerOn || soundOn) {
-          showOsNotification(display.title, display.message ?? "", `pulse-${n.id}`, urgent, true);
+          showOsNotification(display.title, display.message ?? "", `pulse-${n.id}`, urgent, true, link);
         }
         return;
       }
@@ -177,7 +187,7 @@ export function useNotificationToasts() {
               }
             : undefined,
         });
-        showOsNotification(display.title, display.message ?? "", `pulse-${n.id}`, urgent, true);
+        showOsNotification(display.title, display.message ?? "", `pulse-${n.id}`, urgent, true, link);
       }
     }
 

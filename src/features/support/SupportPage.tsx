@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { MeddyHeader, MEDDY_PANE_CLASS } from "@/features/meddy/MeddyShell";
 import { useSupportConversations, useSupportConversation, useSupportRealtime } from "./api";
 import { SupportChatView } from "./SupportChatView";
+import { SupportHistoryView } from "./SupportHistoryView";
 import { displayName, isWaiting, lastPreview, messageCount, type SupportConversation } from "./types";
 
 // Meddy Support console — the staff screen for platform (app.medcurity.com)
@@ -18,6 +19,7 @@ import { displayName, isWaiting, lastPreview, messageCount, type SupportConversa
 export function SupportPage() {
   const [params, setParams] = useSearchParams();
   const selectedId = params.get("conversation");
+  const tab = params.get("tab") === "history" ? "history" : "conversations";
   const { data: conversations, isLoading, isError, isFetching, refetch } = useSupportConversations();
   // Unread dots: a customer message in a conversation you're NOT looking
   // at marks its card until you open it (mirrors the website sidebar).
@@ -71,8 +73,41 @@ export function SupportPage() {
 
   return (
     <div className={MEDDY_PANE_CLASS}>
-      <MeddyHeader stream="platform" />
+      <MeddyHeader
+        stream="platform"
+        rightSlot={
+          <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-0.5">
+            {(["conversations", "history"] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => {
+                  const next = new URLSearchParams(params);
+                  next.delete("conversation");
+                  if (item === "history") next.set("tab", "history");
+                  else next.delete("tab");
+                  setParams(next, { replace: true });
+                }}
+                className={cn(
+                  "rounded-md px-3 py-1 text-xs font-medium capitalize transition-colors",
+                  tab === item
+                    ? "bg-background shadow-sm ring-1 ring-border"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        }
+      />
       <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-card">
+        {tab === "history" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <SupportHistoryView />
+          </div>
+        ) : (
+          <>
         {/* ── Conversation list ── */}
         <div
           className={cn(
@@ -144,6 +179,8 @@ export function SupportPage() {
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -953,6 +953,8 @@ export interface Notification {
     | "meddy_buying_intent"
     | "meddy_missed_chat"
     | "meddy_contact_received"
+    | "support_human_requested"
+    | "support_new_chat"
     | "follow_up_due"
     // Hand-offs (survey T5). Produced entirely by DB triggers on
     // owner_user_id — see 20260817140000_assignment_notifications.sql.

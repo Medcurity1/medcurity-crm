@@ -32,6 +32,7 @@ import {
 } from "@/features/notifications/notifications-api";
 import type { Notification } from "@/types/crm";
 import { notificationForDisplay } from "@/features/notifications/notification-display";
+import { notificationTarget } from "@/features/notifications/notification-target";
 
 const typeIcon: Record<Notification["type"], ComponentType<{ className?: string }>> = {
   task_due: CheckSquare,
@@ -45,6 +46,8 @@ const typeIcon: Record<Notification["type"], ComponentType<{ className?: string 
   meddy_buying_intent: Bot,
   meddy_missed_chat: Bot,
   meddy_contact_received: Bot,
+  support_human_requested: Bot,
+  support_new_chat: Bot,
   follow_up_due: PhoneCall,
   record_assigned: UserPlus,
   task_assigned: ClipboardList,
@@ -64,6 +67,8 @@ const typeColor: Record<Notification["type"], string> = {
   meddy_buying_intent: "text-amber-500 dark:text-amber-400",
   meddy_missed_chat: "text-red-500 dark:text-red-400",
   meddy_contact_received: "text-green-600 dark:text-green-400",
+  support_human_requested: "text-red-600 dark:text-red-400",
+  support_new_chat: "text-violet-600 dark:text-violet-400",
   follow_up_due: "text-teal-600 dark:text-teal-400",
   // Hand-offs (survey T5) — one hue for both so "someone gave me
   // something" reads as a single family in the bell list.
@@ -84,12 +89,13 @@ export function NotificationsDropdown() {
   const [confirmClear, setConfirmClear] = useState(false);
 
   const handleClick = (n: Notification) => {
+    const target = notificationTarget(n);
     if (!n.is_read) {
       markAsRead.mutate(n.id);
     }
-    if (n.link) {
+    if (target) {
       setOpen(false);
-      navigate(n.link);
+      navigate(target);
     }
   };
 
@@ -174,7 +180,7 @@ export function NotificationsDropdown() {
                     key={n.id}
                     className={`group relative flex gap-3 px-4 py-3 transition-colors hover:bg-accent ${
                       !n.is_read ? "bg-accent/40" : ""
-                    } ${n.link ? "cursor-pointer" : ""}`}
+                    } ${notificationTarget(n) ? "cursor-pointer" : ""}`}
                     onClick={() => handleClick(n)}
                   >
                     <div className="flex-shrink-0 pt-0.5">
