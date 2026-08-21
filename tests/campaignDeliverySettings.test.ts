@@ -62,4 +62,13 @@ describe("campaign delivery and inbox UI contracts", () => {
     expect(edge).toContain("max_email_per_day: limit");
     expect(edge).toContain('action === "update-email-account-daily-limit"');
   });
+
+  it("shows Smartlead's exact sent-today count or an honest unavailable state", () => {
+    const inbox = read("src/features/playbook/InboxHealthDialog.tsx");
+    const edge = read("supabase/functions/playbook-smartlead/index.ts");
+    expect(edge).toContain("daily_sent_count");
+    expect(inbox).toContain("sent today");
+    expect(inbox).toContain("Sent today unavailable from Smartlead");
+    expect(inbox).not.toContain("sent_7d} sent today");
+  });
 });

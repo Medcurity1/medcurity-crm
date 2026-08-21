@@ -577,12 +577,20 @@ interface CampaignStep {
 // _shared/smartlead-sync.ts (extracted 2026-07-31, docket I38, so
 // tests/smartleadSyncStatus.test.ts can import it) — imported at top.
 
-async function importCampaigns() {
+async function importCampaigns(deadline?: number) {
   const campaigns = await fetchCampaigns();
   if (!Array.isArray(campaigns)) throw new Error("Unexpected Smartlead response");
   let created = 0;
   let updated = 0;
-  for (const camp of campaigns as Record<string, unknown>[]) {
+  let capped = 0;
+  const processedIds: number[] = [];
+  const rows = campaigns as Record<string, unknown>[];
+  for (let index = 0; index < rows.length; index++) {
+    if (deadline != null && Date.now() > deadline) {
+      capped = rows.length - index;
+      break;
+    }
+    const camp = rows[index];
     const campId = camp.id as number;
     const { data: existing } = await svc
       .from("campaigns")
@@ -593,6 +601,10 @@ async function importCampaigns() {
     let analytics: Record<string, unknown> = {};
     let sequences: unknown = [];
     try { analytics = (await fetchCampaignAnalytics(campId)) as Record<string, unknown>; } catch { /* ignore */ }
+    if (deadline != null && Date.now() > deadline) {
+      capped = rows.length - index;
+      break;
+    }
     try { sequences = await fetchCampaignSequences(campId); } catch { /* ignore */ }
 
     const metrics = buildSmartleadMetrics(analytics);
@@ -616,6 +628,7 @@ async function importCampaigns() {
       });
       if (applyErr) throw new Error(applyErr.message);
       updated++;
+      processedIds.push(campId);
     } else {
       // Brand-new row: no prior status to preserve, and the status column
       // is NOT NULL — fall back to "draft" (the column's own default) if
@@ -630,9 +643,10 @@ async function importCampaigns() {
         steps: [],
       });
       created++;
+      processedIds.push(campId);
     }
   }
-  return { created, updated, total: campaigns.length };
+  return { created, updated, total: campaigns.length, capped, processedIds };
 }
 
 /** `deadline` (epoch ms, optional) caps how long the loop may run — the
@@ -641,7 +655,7 @@ async function importCampaigns() {
  *  button passes none. Campaigns not reached before the deadline are
  *  reported in `capped` and simply wait for the next sync/sweep. Paged
  *  reads (docket I9) so the campaign list can outgrow the 1000-row cap. */
-async function syncCampaigns(deadline?: number) {
+async function syncCampaigns(deadline?: number, reconcileTerminal = true, skipSmartleadIds = new Set<number>()) {
   const existing = await fetchAllRows<Record<string, unknown>>((from, to) =>
     svc
       .from("campaigns")
@@ -650,10 +664,13 @@ async function syncCampaigns(deadline?: number) {
       .order("id", { ascending: true })
       .range(from, to));
   let synced = 0;
+  let attempted = 0;
+  let failed = 0;
   let capped = 0;
   const rows = existing ?? [];
   for (let idx = 0; idx < rows.length; idx++) {
     const c = rows[idx];
+    if (skipSmartleadIds.has(Number(c.smartlead_campaign_id))) continue;
     if (deadline != null && Date.now() > deadline) {
       // Unprocessed = rows not yet REACHED — errored ones were attempted
       // and must not inflate the starvation signal (adversarial review).
@@ -661,7 +678,12 @@ async function syncCampaigns(deadline?: number) {
       break;
     }
     try {
+      attempted++;
       const camp = (await fetchCampaignById(c.smartlead_campaign_id)) as Record<string, unknown>;
+      if (deadline != null && Date.now() > deadline) {
+        capped = rows.length - idx;
+        break;
+      }
       const analytics = (await fetchCampaignAnalytics(c.smartlead_campaign_id)) as Record<string, unknown>;
       const metrics = buildSmartleadMetrics(analytics);
       const merged = { ...(c.metrics ?? {}), ...metrics };
@@ -687,34 +709,41 @@ async function syncCampaigns(deadline?: number) {
       });
       if (applyErr) throw new Error(applyErr.message);
       synced++;
-    } catch { /* skip this one */ }
+    } catch (error) {
+      failed++;
+      console.error(`sync: campaign ${c.smartlead_campaign_id} failed:`, (error as Error).message);
+    }
   }
-  // Interactive Sync (no deadline) also closes stale active enrollments on
+  // Interactive Sync also closes stale active enrollments on
   // campaigns that are already stopped/completed in Pulse. The daily sweep
   // still owns this as step 6 so a budget-capped sync cannot skip the
   // nightly catch-up.
-  if (deadline == null) {
-    const reconciled = await reconcileTerminalEnrollments();
-    return {
-      synced,
-      capped,
-      enrollments_updated: reconciled.enrollments_updated,
-      enrollments_deferred: reconciled.enrollments_deferred,
-      tasks_cancelled: reconciled.tasks_cancelled,
-    };
-  }
-  return { synced, capped };
+  const reconciled = reconcileTerminal
+    ? await reconcileTerminalEnrollments(deadline)
+    : { enrollments_updated: 0, enrollments_deferred: 0, tasks_cancelled: 0, capped: 0 };
+  return {
+    synced,
+    attempted,
+    failed,
+    capped: capped + reconciled.capped,
+    enrollments_updated: reconciled.enrollments_updated,
+    enrollments_deferred: reconciled.enrollments_deferred,
+    tasks_cancelled: reconciled.tasks_cancelled,
+  };
 }
 
 async function refreshSmartlead() {
-  const imported = await importCampaigns();
-  const synced = await syncCampaigns();
+  const deadline = Date.now() + 35_000;
+  const imported = await importCampaigns(deadline);
+  const synced = await syncCampaigns(deadline, true, new Set(imported.processedIds));
   return {
     created: imported.created,
     updated: imported.updated,
     total: imported.total,
     synced: synced.synced,
-    capped: synced.capped ?? 0,
+    attempted: synced.attempted,
+    failed: synced.failed,
+    capped: (imported.capped ?? 0) + (synced.capped ?? 0),
     enrollments_updated: synced.enrollments_updated ?? 0,
     enrollments_deferred: synced.enrollments_deferred ?? 0,
     tasks_cancelled: synced.tasks_cancelled ?? 0,
@@ -736,6 +765,9 @@ async function reconcileTerminalEnrollments(deadline?: number): Promise<{
   let enrollments_deferred = 0;
   let tasks_cancelled = 0;
   let capped = 0;
+  if (deadline != null && Date.now() > deadline) {
+    return { enrollments_updated, enrollments_deferred, tasks_cancelled, capped: 1 };
+  }
   const doneCampaigns = await fetchAllRows<{ id: string; status: string }>((from, to) =>
     svc
       .from("campaigns")
@@ -869,6 +901,7 @@ interface LaunchInput {
   autoStart?: boolean;
   adaptiveEnabled?: boolean;
   owner_id?: string;
+  authoring_method?: "ai" | "write_own" | "template";
   // Normalized emails the caller deliberately included despite being on the
   // Do-Not-Email list (per-person "Include anyway" in CampaignRecipients.tsx).
   // The client's own filtering is not trusted — see the suppression re-check
@@ -2097,6 +2130,7 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
             max_new_leads_per_day: maxNewLeadsPerDay,
           },
           sender: { email_account_id: p.email_account_id ?? null },
+          authoring_method: p.authoring_method ?? (p.template_id ? "template" : "ai"),
         },
       })
       .select("id")
@@ -2419,6 +2453,7 @@ interface InboxHealthEntry {
   from_email: string | null;
   from_name: string | null;
   daily_limit: number | null;
+  sent_today: number | null;
   warmup: InboxHealthWarmup | null;
   campaigns: InboxHealthCampaignSummary[];
   total_leads_per_day: number;
@@ -2597,6 +2632,10 @@ async function inboxHealth(): Promise<{ inboxes: InboxHealthEntry[] }> {
       from_email: typeof a.from_email === "string" ? a.from_email : null,
       from_name: typeof a.from_name === "string" ? a.from_name : null,
       daily_limit: extractDailyLimit(a),
+      sent_today: (() => {
+        const value = firstNumber(a.daily_sent_count);
+        return value != null && value >= 0 ? value : null;
+      })(),
       warmup,
       campaigns,
       total_leads_per_day: totalLeadsPerDay,
@@ -3175,7 +3214,9 @@ async function dailySweep(): Promise<DailySweepReport> {
   // hasBudget() check — a Smartlead 429 window could spend the entire
   // 100s here and starve every later step, every night.
   try {
-    const { synced, capped } = await syncCampaigns(Date.now() + STEP1_BUDGET_MS);
+    // The sweep's dedicated step 6 owns terminal reconciliation; do not
+    // duplicate that work inside metrics sync and spend the same budget twice.
+    const { synced, capped } = await syncCampaigns(Date.now() + STEP1_BUDGET_MS, false);
     report.campaigns_synced = synced;
     if (capped > 0) {
       report.skipped_for_budget += capped;
@@ -3794,7 +3835,7 @@ Deno.serve(async (req) => {
       return json({ accounts: accounts as unknown[] });
     }
     if (action === "import") return json(await importCampaigns());
-    if (action === "sync") return json(await syncCampaigns());
+    if (action === "sync") return json(await syncCampaigns(Date.now() + 35_000));
     if (action === "refresh") return json(await refreshSmartlead());
     if (action === "daily-sweep") return json(await runDailySweepWithLog());
     if (action === "inbox-health") return json(await inboxHealth());

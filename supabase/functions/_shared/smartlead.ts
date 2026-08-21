@@ -5,6 +5,7 @@
 // strings, e.g. "45.2%").
 
 const SMARTLEAD_BASE = "https://server.smartlead.ai/api/v1";
+const SMARTLEAD_REQUEST_TIMEOUT_MS = 15_000;
 let lastRequest = 0;
 let queue: Promise<unknown> = Promise.resolve();
 
@@ -22,7 +23,22 @@ async function doFetch(endpoint: string, apiKey: string, init?: RequestInit): Pr
   let retries = 0;
   while (retries < 3) {
     const sep = endpoint.includes("?") ? "&" : "?";
-    const res = await fetch(`${SMARTLEAD_BASE}${endpoint}${sep}api_key=${apiKey}`, init);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SMARTLEAD_REQUEST_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`${SMARTLEAD_BASE}${endpoint}${sep}api_key=${apiKey}`, {
+        ...init,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`Smartlead request timed out after ${SMARTLEAD_REQUEST_TIMEOUT_MS / 1000} seconds`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
     if (res.status === 429) {
       retries++;
       await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, retries)));

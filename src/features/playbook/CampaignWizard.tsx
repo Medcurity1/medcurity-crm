@@ -14,6 +14,7 @@
 // confirmation; Save as draft remains a deliberate Review-step choice.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import {
   Loader2, Sparkles, Wand2, ArrowLeft, ArrowRight, Rocket, CheckCircle2, AlertTriangle,
   Plus, Trash2, Eye, PencilLine, PenLine, LayoutTemplate, RotateCw, UserRound, Building2, Signature,
@@ -281,6 +282,8 @@ export function CampaignWizard({
   // Serialized snapshot of the first "has content" state of this open —
   // the autosave effect's dirty gate (only divergence from it gets saved).
   const autosaveBaselineRef = useRef<string | null>(null);
+  const closeBaselineRef = useRef<string | null>(null);
+  const [wizardDirty, setWizardDirty] = useState(false);
   const [draftBanner, setDraftBanner] = useState<{
     id: string; title: string; updatedAt: string; state: CampaignDraftState;
   } | null>(null);
@@ -419,6 +422,38 @@ export function CampaignWizard({
     return false;
   }, [recipients, templateName, mode, campaign, templateSteps]);
 
+  const closeStateSnapshot = useMemo(() => JSON.stringify({
+    step, description, campaign, templateName, templateSteps, flow, customSequence,
+    recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
+    autoStart, adaptive, leadsPerDay, minGap, sendDays, sendStart, sendEnd, sendTimezone,
+  }), [
+    step, description, campaign, templateName, templateSteps, flow, customSequence,
+    recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
+    autoStart, adaptive, leadsPerDay, minGap, sendDays, sendStart, sendEnd, sendTimezone,
+  ]);
+
+  useEffect(() => {
+    if (!open) {
+      closeBaselineRef.current = null;
+      setWizardDirty(false);
+      return;
+    }
+    if (closeBaselineRef.current === null) {
+      closeBaselineRef.current = closeStateSnapshot;
+      setWizardDirty(false);
+      return;
+    }
+    setWizardDirty(closeStateSnapshot !== closeBaselineRef.current);
+  }, [open, closeStateSnapshot]);
+
+  // Guard every Radix dismissal path, including the built-in X, Escape,
+  // and outside click. Autosave is still a recovery net, but it must not be
+  // used as permission to silently close while a person is actively editing.
+  const discard = useDialogDiscardGuard(wizardDirty && !launchResult, () => {
+    reset();
+    onOpenChange(false);
+  });
+
   // Resume-a-draft check, once per open. Skipped entirely when
   // initialRecipients was passed — that's a deliberate fresh start (right-
   // click "Start a campaign…"), never a "did you mean to resume?" moment.
@@ -533,17 +568,12 @@ export function CampaignWizard({
     setEditingSequence(false); setSequenceAttempted(false); setSettingsOpen(false);
     setConfirmOpen(false); setDraftBanner(null); draftIdRef.current = null;
     autosaveBaselineRef.current = null;
+    closeBaselineRef.current = null;
+    setWizardDirty(false);
   }
   function close(o: boolean) {
-    if (!o) {
-      // The autosave already ran, so an accidental Escape / outside-click no
-      // longer loses anything — just say so, quietly, once.
-      if (hasMeaningfulContent && draftIdRef.current) {
-        toast.info("Draft saved. Pick up where you left off next time.");
-      }
-      reset();
-    }
-    onOpenChange(o);
+    if (o) onOpenChange(true);
+    else discard.requestClose();
   }
 
   function handleGenerate(desc?: string) {
@@ -662,6 +692,7 @@ export function CampaignWizard({
       autoStart,
       adaptiveEnabled: adaptive,
       owner_id: ownerId || profile?.id,
+      authoring_method: flow === "ai" ? "ai" as const : customSequence ? "write_own" as const : "template" as const,
       schedule: {
         max_new_leads_per_day: effectiveLeadsPerDay,
         days_of_week: deliverySettings.daysOfWeek,
@@ -1561,6 +1592,7 @@ export function CampaignWizard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {discard.dialog}
     </>
   );
 }

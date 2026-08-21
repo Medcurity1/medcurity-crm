@@ -380,13 +380,20 @@ function useSmartleadAction(action: "import" | "sync" | "refresh") {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
-        body: { action },
+      const invoke = supabase.functions.invoke("playbook-smartlead", { body: { action } });
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error("Smartlead sync took longer than 55 seconds. Partial updates were kept; retry to finish the remaining campaigns.")),
+          55_000,
+        );
       });
+      const { data, error } = await Promise.race([invoke, timeout]).finally(() => clearTimeout(timeoutId));
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       return data as {
         created?: number; updated?: number; total?: number; synced?: number;
+        attempted?: number; failed?: number;
         capped?: number; enrollments_updated?: number; enrollments_deferred?: number;
         tasks_cancelled?: number;
       };
@@ -534,6 +541,8 @@ export interface InboxHealthEntry {
   from_email: string | null;
   from_name: string | null;
   daily_limit: number | null;
+  /** Smartlead's daily_sent_count. Null means the provider did not return it. */
+  sent_today: number | null;
   warmup: {
     sent_7d: number | null;
     inbox_rate: number | null;
@@ -624,6 +633,7 @@ export function useLaunchCampaign() {
       autoStart?: boolean;
       adaptiveEnabled?: boolean;
       owner_id?: string;
+      authoring_method?: "ai" | "write_own" | "template";
       schedule?: Record<string, unknown>;
       // Normalized emails the user deliberately chose to include despite
       // being on the Do-Not-Email list (per-person "Include anyway" — see
