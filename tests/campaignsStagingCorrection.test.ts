@@ -89,6 +89,7 @@ describe("Campaigns home correction", () => {
     expect(api).toMatch(/Partial updates were kept/);
     expect(edge).toMatch(/syncCampaigns\(Date\.now\(\) \+ 35_000\)/);
     expect(edge).toMatch(/new Set\(imported\.processedIds\)/);
+    expect(edge).toMatch(/if \(!existing\)[\s\S]*fetchCampaignSequences/);
     expect(edge).toMatch(/reconcileTerminalEnrollments\(deadline\)/);
     expect(shared).toMatch(/SMARTLEAD_REQUEST_TIMEOUT_MS = 15_000/);
     expect(shared).toMatch(/controller\.abort\(\)/);

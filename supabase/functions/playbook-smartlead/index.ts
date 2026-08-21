@@ -605,7 +605,12 @@ async function importCampaigns(deadline?: number) {
       capped = rows.length - index;
       break;
     }
-    try { sequences = await fetchCampaignSequences(campId); } catch { /* ignore */ }
+    // Existing Pulse rows already carry their frozen sequence/notes. Only a
+    // brand-new Smartlead campaign needs the sequence download for import;
+    // fetching it for every known row doubled ordinary Sync latency.
+    if (!existing) {
+      try { sequences = await fetchCampaignSequences(campId); } catch { /* ignore */ }
+    }
 
     const metrics = buildSmartleadMetrics(analytics);
     const notes = notesFromSequences(sequences);
