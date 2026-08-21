@@ -133,6 +133,7 @@ Source: `docs/audit/2026-07-28-campaigns-outside-review.md` (61-agent read-only 
 | G5 | Pulse Arcade hub | Nathan | Games list, profiles, records, daily events. Revisit at 6+ games (currently 3). |
 | G6 | Reverse FTE autofill (opportunity → account) | Molly | One-way account→opp shipped; her ask was bidirectional. |
 | G7 | Nexus called-by filter caps at 250 contact ids | (review note) | Sanity-check under real volume post-adoption. |
+| G9 | Browser Back that always works | Nathan 8/19 ("shelf this for another day") | Going back to the page you were just on "doesn't always work because of how the site is set up" — some flows replace history or live in dialog/tab state the URL doesn't capture. Someday: audit the worst offenders (dialogs, tab params, replace-navigations) and make Back predictable, or add an in-app "back to where I was" affordance. |
 | G8 | Claim panel: "possible duplicate" badge | (from Joe's 8/3 dup report) | Both surviving dup halves sat unnoticed in the to-be-claimed queue. Run find_covering_renewal_deal per unclaimed row (or a batched view) and badge rows that already have a covering deal, so a dup half can't hide in the claim queue again. Small build. |
 
 ---
