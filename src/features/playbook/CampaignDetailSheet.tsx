@@ -13,7 +13,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ExternalLink, Loader2, Pause, PlayCircle, Search, Square } from "lucide-react";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -175,6 +175,9 @@ export function CampaignDetailSheet({
                 <DialogTitle className="truncate">{c.name}</DialogTitle>
                 <Badge variant="secondary" className={statusMeta.className}>{statusMeta.label}</Badge>
               </div>
+              <DialogDescription className="sr-only">
+                Campaign status, delivery, sequence, engagement, enrolled people, and recent activity.
+              </DialogDescription>
               <p className="text-xs text-muted-foreground mt-1">
                 {c.owner?.full_name ?? ""}
                 {c.owner?.full_name && hint ? " · " : ""}
