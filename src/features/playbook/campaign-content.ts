@@ -43,8 +43,8 @@ export function hasUnsupportedRichEmailHtml(template: string): boolean {
   return false;
 }
 
-export function templateToAuthorText(template: string): string {
-  return decodeBasicEntities(template ?? "")
+function inlineHtmlToAuthor(html: string): string {
+  return html
     .replace(/\{\{#if\s+first_name\}\}\s*\{\{\s*first_name\s*\}\}\s*\{\{else\}\}\s*there\s*\{\{\/if\}\}/gi, AUTHOR_TOKENS.firstName)
     .replace(/\{\{#if\s+company_name\}\}\s*\{\{\s*company_name\s*\}\}\s*\{\{else\}\}\s*your organization\s*\{\{\/if\}\}/gi, AUTHOR_TOKENS.organization)
     .replace(/\{\{\s*first_name\s*\}\}/gi, AUTHOR_TOKENS.firstName)
@@ -57,10 +57,25 @@ export function templateToAuthorText(template: string): string {
     .replace(/<li\b[^>]*>/gi, "• ")
     .replace(/<\/li\s*>/gi, "\n")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p\s*>/gi, "\n\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/<[^>]+>/g, "");
+}
+
+export function templateToAuthorText(template: string): string {
+  const decoded = decodeBasicEntities(template ?? "");
+  const paragraphs = [...decoded.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)];
+  if (paragraphs.length > 0) {
+    const leftover = decoded
+      .replace(/<p\b[^>]*>[\s\S]*?<\/p>/gi, "")
+      .replace(/<[^>]+>/g, "");
+    if (!leftover.trim()) {
+      return paragraphs.map((match) => inlineHtmlToAuthor(match[1])).join("\n\n");
+    }
+  }
+  return inlineHtmlToAuthor(
+    decoded
+      .replace(/<\/p\s*>/gi, "\n\n")
+      .replace(/<p\b[^>]*>/gi, ""),
+  ).replace(/\n{3,}/g, "\n\n");
 }
 
 function escapeHtml(value: string): string {
@@ -79,9 +94,9 @@ function authorInlineToHtml(value: string): string {
 }
 
 export function authorTextToTemplateHtml(text: string): string {
-  const normalized = (text ?? "").replace(/\r\n?/g, "\n").trim();
-  if (!normalized) return "";
-  return normalized
+  const source = (text ?? "").replace(/\r\n?/g, "\n");
+  if (!source.trim()) return "";
+  return source
     .split(/\n{2,}/)
     .map((paragraph) => `<p>${authorInlineToHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
     .join("");

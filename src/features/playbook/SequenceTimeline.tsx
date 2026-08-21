@@ -5,7 +5,7 @@ import { ChevronDown, Mail, MailCheck, Phone, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { SequenceStep, SequenceChannel } from "./types";
-import { formatSequenceWhen } from "./campaign-launch";
+import { firstMeaningfulLine, formatSequenceWhen, sequenceStepHeadline } from "./campaign-launch";
 
 const CHANNEL: Record<SequenceChannel, { icon: typeof Mail; label: string; badge: string; line: string }> = {
   EMAIL_AUTO:   { icon: Mail,      label: "Automated email",        badge: "bg-blue-500/15 text-blue-600 dark:text-blue-400",     line: "bg-blue-500/30" },
@@ -72,12 +72,18 @@ export function SequenceTimeline({
   steps,
   previewContext = {},
   defaultExpanded = false,
+  onEdit,
 }: {
   steps: SequenceStep[];
   previewContext?: SequencePreviewContext;
   defaultExpanded?: boolean;
+  onEdit?: (step: SequenceStep) => void;
 }) {
   const ordered = [...steps].sort((a, b) => a.order - b.order);
+  const firstEmailOrder = Math.min(
+    ...ordered.filter((s) => s.channel === "EMAIL_AUTO").map((s) => s.order),
+    Number.POSITIVE_INFINITY,
+  );
   const [openOrder, setOpenOrder] = useState<number | null>(defaultExpanded ? (ordered[0]?.order ?? null) : null);
   return (
     <div className="relative">
@@ -86,7 +92,19 @@ export function SequenceTimeline({
         const Icon = cfg.icon;
         const who = whoBadge(s);
         const open = openOrder === s.order;
-        const when = formatSequenceWhen(s.day_offset, weekdayForOffset(s.day_offset), s.send_window_start, s.send_window_end);
+        // Automated emails send inside the campaign's Smartlead window, not
+        // at a per-step hour — printing the step's stored clock times there
+        // would advertise a control that doesn't exist (Nathan 8/19). Task
+        // steps keep their time: it's when the task comes due.
+        const when = s.channel === "EMAIL_AUTO"
+          ? formatSequenceWhen(s.day_offset, weekdayForOffset(s.day_offset))
+          : formatSequenceWhen(s.day_offset, weekdayForOffset(s.day_offset), s.send_window_start, s.send_window_end);
+        const headline = sequenceStepHeadline({
+          channel: s.channel,
+          subject: readableTaskPreview(s.subject_template, previewContext) || s.subject_template,
+          isFirstEmail: s.channel === "EMAIL_AUTO" && s.order === firstEmailOrder,
+        });
+        const preview = firstMeaningfulLine(readableTaskPreview(s.body_template || s.task_note_template, previewContext) || s.body_template || s.task_note_template);
         return (
           <div key={s.order} className="flex gap-3 pb-2 last:pb-0 relative">
             {i < ordered.length - 1 && (
@@ -95,28 +113,45 @@ export function SequenceTimeline({
             <div className={cn("h-8 w-8 rounded-full flex items-center justify-center shrink-0 z-10", cfg.badge)}>
               <Icon className="h-3.5 w-3.5" />
             </div>
-            <div className="flex-1 min-w-0">
-              <button
-                type="button"
-                aria-expanded={open}
-                onClick={() => setOpenOrder(open ? null : s.order)}
-                className="w-full rounded-lg border bg-card px-3 py-2 text-left hover:border-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <div className="flex items-center gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-medium text-muted-foreground">{when}</p>
-                    <p className="font-medium text-sm truncate">{cfg.label}</p>
-                  </div>
-                  <Badge variant="outline" className={cn("hidden sm:inline-flex text-[10px] font-medium shrink-0", who.cls)}>{who.text}</Badge>
-                  <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
-                </div>
-                {open && (
-                  <div className="mt-2 space-y-1">
-                    <Badge variant="outline" className={cn("sm:hidden text-[10px] font-medium", who.cls)}>{who.text}</Badge>
-                    <p className="text-xs text-muted-foreground">{subtitle(s, previewContext)}</p>
-                  </div>
+            <div className="flex-1 min-w-0 rounded-xl bg-card/80 px-3 py-2.5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() => setOpenOrder(open ? null : s.order)}
+                  className="min-w-0 flex-1 text-left hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+                >
+                  <p className="font-medium text-sm truncate">{headline}</p>
+                  <p className="text-xs text-muted-foreground">{when} · {cfg.label}</p>
+                  {preview && !open && (
+                    <p className="text-xs text-muted-foreground mt-0.5 truncate">{preview}</p>
+                  )}
+                </button>
+                <Badge variant="outline" className={cn("hidden sm:inline-flex text-xs font-medium shrink-0", who.cls)}>{who.text}</Badge>
+                {onEdit && (
+                  <button
+                    type="button"
+                    className="shrink-0 text-xs font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md px-1"
+                    onClick={() => onEdit(s)}
+                  >
+                    Edit
+                  </button>
                 )}
-              </button>
+                <button
+                  type="button"
+                  aria-label={open ? "Collapse step" : "Expand step"}
+                  onClick={() => setOpenOrder(open ? null : s.order)}
+                  className="shrink-0 rounded-md p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
+                </button>
+              </div>
+              {open && (
+                <div className="mt-2 space-y-1">
+                  <Badge variant="outline" className={cn("sm:hidden text-xs font-medium", who.cls)}>{who.text}</Badge>
+                  <p className="text-xs text-muted-foreground">{subtitle(s, previewContext) || preview || "No copy yet."}</p>
+                </div>
+              )}
             </div>
           </div>
         );

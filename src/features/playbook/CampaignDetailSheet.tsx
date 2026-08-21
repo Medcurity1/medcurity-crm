@@ -1,4 +1,4 @@
-// Campaign detail sheet (Campaigns overhaul S8) — the full-height view that
+// Campaign detail dialog (Campaigns overhaul S8) — the focused workspace that
 // opens when a rep clicks a campaign card in the tracker. Header mirrors the
 // card (status, owner, inbox, origin, anchor date, Smartlead link, the same
 // Start/Pause/Resume/Stop controls), then the frozen sequence, aggregate
@@ -6,15 +6,15 @@
 // the last 20 webhook events for this campaign. Nothing here is a second
 // source of truth: the campaign row is the one CampaignsTab already has
 // loaded (via useCampaigns), and the two new queries below (enrollments,
-// events) are lazy — they only fire while the sheet is actually open.
+// events) are lazy — they only fire while the dialog is actually open.
 
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ExternalLink, Loader2, Pause, PlayCircle, Search, Square } from "lucide-react";
 import {
-  Sheet, SheetContent, SheetHeader, SheetTitle,
-} from "@/components/ui/sheet";
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,7 @@ import { formatName, formatDate, formatDateOnly, formatDateTime, formatRelativeD
 import { cn } from "@/lib/utils";
 import { QueryError } from "@/components/QueryError";
 import { SequenceTimeline } from "./SequenceTimeline";
+import { deliverySummary, normalizeDeliverySettings } from "./delivery-settings";
 import { STATUS_META, originHint, CampaignStatusControls, type CampaignRow } from "./CampaignCard";
 import {
   smartleadUrl, useCampaignEnrollments, useCampaignEvents, useCampaignEventStats, useSetEnrollmentStatus,
@@ -138,6 +139,17 @@ export function CampaignDetailSheet({
   const statusMeta = STATUS_META[c.status] ?? { label: c.status, className: "" };
   const hint = originHint(c);
   const url = smartleadUrl(c.smartlead_campaign_id);
+  const storedDelivery = c.settings?.delivery && typeof c.settings.delivery === "object"
+    ? c.settings.delivery as Record<string, unknown>
+    : null;
+  const delivery = storedDelivery ? normalizeDeliverySettings({
+    daysOfWeek: Array.isArray(storedDelivery.days_of_week) ? storedDelivery.days_of_week as number[] : undefined,
+    timezone: typeof storedDelivery.timezone === "string" ? storedDelivery.timezone : undefined,
+    startHour: typeof storedDelivery.start_hour === "string" ? storedDelivery.start_hour : undefined,
+    endHour: typeof storedDelivery.end_hour === "string" ? storedDelivery.end_hour : undefined,
+    campaignDailyVolume: Number(storedDelivery.max_new_leads_per_day) || c.leads_per_day,
+    messageSpacingMinutes: Number(storedDelivery.min_time_btw_emails) || undefined,
+  }) : null;
 
   function runEnrollmentAction(e: CampaignEnrollmentRow, action: EnrollmentStatusAction) {
     setEnrollment.mutate(
@@ -154,13 +166,13 @@ export function CampaignDetailSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-2xl flex flex-col gap-0 p-0">
-        <SheetHeader className="border-b px-5 py-4 gap-3 pr-10">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="camp-scope camp-shell w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:max-w-5xl h-[min(48rem,88vh)] flex flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b px-5 sm:px-6 py-4 gap-3 pr-12 text-left">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <SheetTitle className="truncate">{c.name}</SheetTitle>
+                <DialogTitle className="truncate">{c.name}</DialogTitle>
                 <Badge variant="secondary" className={statusMeta.className}>{statusMeta.label}</Badge>
               </div>
               <p className="text-xs text-muted-foreground mt-1">
@@ -171,15 +183,26 @@ export function CampaignDetailSheet({
                 {c.anchor_date ? `${(c.owner?.full_name || hint || inboxLabel) ? " · " : ""}anchored ${formatDate(c.anchor_date)}` : ""}
               </p>
             </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CampaignStatusControls c={c} setStatus={setStatus} />
             {url && (
               <a href={url} target="_blank" rel="noopener noreferrer"
-                className="text-xs text-primary hover:underline inline-flex items-center gap-1 shrink-0">
-                Smartlead <ExternalLink className="h-3 w-3" />
+                className="camp-btn h-8 text-xs mr-1">
+                Open in Smartlead <ExternalLink className="h-3 w-3" />
               </a>
             )}
           </div>
 
-          <CampaignStatusControls c={c} setStatus={setStatus} />
+          {delivery && (
+            <div className="rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--camp-line)", background: "var(--camp-surface-2)" }}>
+              <span className="font-medium">Delivery:</span>{" "}
+              <span className="text-muted-foreground">
+                {deliverySummary(delivery)} · {delivery.campaignDailyVolume} new people/day · {delivery.messageSpacingMinutes} minute message spacing
+              </span>
+            </div>
+          )}
 
           {/* Live-updates health + on-demand AI (docket I1 + I12). Only for
               Smartlead-linked campaigns — legacy/migrated rows have neither. */}
@@ -235,9 +258,9 @@ export function CampaignDetailSheet({
               )}
             </div>
           )}
-        </SheetHeader>
+        </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-5 space-y-6">
           {/* Sequence strip */}
           {c.steps?.length > 0 && (
             <div className="space-y-2">
@@ -513,7 +536,7 @@ export function CampaignDetailSheet({
             )}
           </div>
         </div>
-      </SheetContent>
+      </DialogContent>
 
       <AlertDialog open={!!stopTarget} onOpenChange={(v) => !v && setStopTarget(null)}>
         <AlertDialogContent>
@@ -537,6 +560,6 @@ export function CampaignDetailSheet({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Sheet>
+    </Dialog>
   );
 }

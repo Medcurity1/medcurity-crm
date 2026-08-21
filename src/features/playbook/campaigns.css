@@ -1,0 +1,599 @@
+/* Campaigns — the Aurora design language, done properly (Nathan 8/19).
+ *
+ * Every rule is namespaced .camp-*; nothing redefines app-root variables,
+ * the shared theme, or components other routes consume. Two scope classes
+ * with ONE job each — the lesson from the 8/19 dialog regression, where a
+ * single class carried both the page wash and the tokens, and "fixing"
+ * the wash to transparent nuked every campaigns dialog's background:
+ *
+ *   .camp-scope  tokens ONLY. Paints nothing. Safe on any element —
+ *                including portaled DialogContent/SheetContent, which
+ *                render outside the page tree and need their own copy of
+ *                the variables.
+ *   .camp-wash   the page canvas decoration. Page shell only, never a
+ *                dialog. Light mode gets the soft lavender aurora wash
+ *                from Nathan's approved mockups; dark mode stays on the
+ *                platform's own canvas (his 8/19 call) — Aurora lives in
+ *                the cards, buttons, and dialogs instead.
+ *
+ * Color rules: the pink→purple→indigo gradient is reserved for the ONE
+ * primary action on any surface (and selected states). Everything else is
+ * quiet surfaces with visible, hoverable borders — every clickable thing
+ * must LOOK clickable (Nathan's #1 gripe with the old tab).
+ */
+
+.camp-scope {
+  --camp-pink: hsl(330 85% 62%);
+  --camp-purple: hsl(268 78% 62%);
+  --camp-indigo: hsl(250 80% 62%);
+  --camp-gradient: linear-gradient(135deg, var(--camp-pink) 0%, var(--camp-purple) 52%, var(--camp-indigo) 100%);
+
+  /* light theme */
+  --camp-surface: hsl(0 0% 100%);
+  --camp-surface-2: hsl(252 45% 98.4%);
+  --camp-line: hsl(258 28% 89%);
+  --camp-line-strong: hsl(262 32% 80%);
+  --camp-text: hsl(255 22% 15%);
+  --camp-muted: hsl(256 10% 44%);
+  --camp-tint: hsl(266 70% 97%);
+  --camp-tint-strong: hsl(266 68% 94.5%);
+  --camp-accent-text: hsl(268 65% 48%);
+  /* Section headers sit RECESSED (rows are elevated cards) and glow cyan
+     on hover — a different hue than the rows' purple, so headers and
+     items read apart at a glance (Nathan 8/19 round 3). */
+  --camp-head-bg: hsl(256 45% 95.5% / 0.75);
+  --camp-head-line: hsl(258 28% 90%);
+  --camp-glow: hsl(196 85% 42%);
+  --camp-shadow: 0 1px 2px hsl(260 40% 40% / 0.05), 0 8px 24px hsl(262 45% 45% / 0.07);
+  --camp-shadow-lift: 0 2px 4px hsl(260 40% 40% / 0.07), 0 14px 34px hsl(262 45% 45% / 0.13);
+  --camp-cta-shadow: 0 6px 18px hsl(268 70% 55% / 0.35);
+  --camp-cta-shadow-lift: 0 10px 26px hsl(268 72% 52% / 0.45);
+}
+
+.dark .camp-scope {
+  --camp-surface: hsl(249 15% 13.5%);
+  --camp-surface-2: hsl(250 14% 16.5%);
+  --camp-line: hsl(251 12% 25%);
+  --camp-line-strong: hsl(255 16% 34%);
+  --camp-text: hsl(255 25% 94%);
+  --camp-muted: hsl(252 10% 68%);
+  --camp-tint: hsl(260 22% 19%);
+  --camp-tint-strong: hsl(262 24% 23%);
+  --camp-accent-text: hsl(266 85% 80%);
+  --camp-head-bg: hsl(250 20% 8.5% / 0.8);
+  --camp-head-line: hsl(251 12% 20%);
+  --camp-glow: hsl(190 90% 58%);
+  --camp-shadow: 0 1px 2px hsl(250 30% 4% / 0.4), 0 10px 26px hsl(250 30% 4% / 0.34);
+  --camp-shadow-lift: 0 2px 4px hsl(250 30% 4% / 0.45), 0 16px 36px hsl(250 30% 4% / 0.5);
+  --camp-cta-shadow: 0 6px 18px hsl(268 70% 40% / 0.4);
+  --camp-cta-shadow-lift: 0 10px 26px hsl(268 72% 45% / 0.55);
+}
+
+/* ── Page canvas ────────────────────────────────────────────────────── */
+/* Light: the mockups' soft aurora — two faint radials over a lavender-
+   white base, rounded so it reads as the tab's own stage. Dark: nothing;
+   the platform canvas shows through untouched (Nathan 8/19). */
+.camp-wash {
+  position: relative;
+  border-radius: 1.25rem;
+}
+.camp-wash::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(110% 65% at 100% -12%, hsl(330 90% 96%), transparent 55%),
+    radial-gradient(85% 55% at -5% -5%, hsl(262 85% 96.5%), transparent 52%),
+    hsl(252 60% 98.6%);
+  border: 1px solid hsl(258 40% 93%);
+}
+.dark .camp-wash::before {
+  content: none;
+}
+.camp-wash > * {
+  position: relative;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+/* The one gradient primary per surface. Pill-shaped like the mockups'
+   "Launch campaign", with a real hover: lift + glow. */
+.camp-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  background-image: var(--camp-gradient);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border: 0;
+  border-radius: 9999px;
+  padding: 0.5rem 1.05rem;
+  box-shadow: var(--camp-cta-shadow);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+.camp-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow: var(--camp-cta-shadow-lift);
+  color: #fff;
+}
+.camp-btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+.camp-btn-primary:focus-visible {
+  outline: 2px solid var(--camp-purple);
+  outline-offset: 2px;
+}
+.camp-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Quiet-but-obviously-clickable secondary. */
+.camp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  background: var(--camp-surface);
+  color: var(--camp-text);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border: 1px solid var(--camp-line);
+  border-radius: 0.65rem;
+  padding: 0.45rem 0.85rem;
+  box-shadow: 0 1px 2px hsl(260 30% 30% / 0.06);
+  cursor: pointer;
+  transition: transform 0.14s ease, border-color 0.14s ease, background-color 0.14s ease, box-shadow 0.14s ease;
+}
+.camp-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--camp-purple) 45%, var(--camp-line));
+  background: var(--camp-tint);
+  transform: translateY(-1px);
+  box-shadow: var(--camp-shadow);
+}
+.camp-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.camp-btn:focus-visible {
+  outline: 2px solid var(--camp-purple);
+  outline-offset: 2px;
+}
+.camp-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.camp-btn--danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, hsl(0 72% 55%) 55%, var(--camp-line));
+  background: color-mix(in srgb, hsl(0 72% 55%) 8%, var(--camp-surface));
+  color: hsl(0 68% 52%);
+}
+.dark .camp-btn--danger:hover:not(:disabled) {
+  color: hsl(0 85% 72%);
+}
+
+/* Filter pills (Everyone / Mine) — segmented, selected = gradient. */
+.camp-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--camp-muted);
+  cursor: pointer;
+  transition: color 0.13s ease, background-color 0.13s ease, border-color 0.13s ease;
+}
+.camp-pill:hover {
+  color: var(--camp-text);
+  background: var(--camp-tint);
+}
+.camp-pill[aria-pressed="true"] {
+  background-image: var(--camp-gradient);
+  color: #fff;
+  box-shadow: 0 2px 8px hsl(268 70% 55% / 0.3);
+}
+
+/* ── Cards & sections ───────────────────────────────────────────────── */
+.camp-card {
+  background: var(--camp-surface);
+  border: 1px solid var(--camp-line);
+  border-radius: 1rem;
+  box-shadow: var(--camp-shadow);
+}
+
+/* Collapsible home sections: one consistent treatment for every group
+   (Needs you is no longer the lone boxed one). The whole header is a
+   real button with a visible hover. */
+.camp-section-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.6rem;
+  text-align: left;
+  background: var(--camp-head-bg);
+  border: 1px solid var(--camp-head-line);
+  border-radius: 0.9rem;
+  padding: 0.6rem 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease, box-shadow 0.14s ease;
+}
+.camp-section-head:hover {
+  border-color: color-mix(in srgb, var(--camp-glow) 55%, var(--camp-head-line));
+  background: color-mix(in srgb, var(--camp-glow) 7%, var(--camp-head-bg));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--camp-glow) 22%, transparent),
+    0 4px 16px color-mix(in srgb, var(--camp-glow) 16%, transparent);
+}
+.camp-section-head:focus-visible {
+  outline: 2px solid var(--camp-purple);
+  outline-offset: 2px;
+}
+.camp-section-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--camp-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.camp-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 9999px;
+  background: var(--camp-tint-strong);
+  color: var(--camp-accent-text);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+/* Campaign list rows — calmer, less wordy, obviously interactive. */
+.camp-row {
+  position: relative;
+  background: var(--camp-surface);
+  border: 1px solid var(--camp-line);
+  border-radius: 0.9rem;
+  box-shadow: 0 1px 2px hsl(260 30% 30% / 0.05);
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  overflow: hidden;
+}
+.camp-row--clickable {
+  cursor: pointer;
+}
+.camp-row--clickable:hover {
+  border-color: color-mix(in srgb, var(--camp-purple) 45%, var(--camp-line));
+  transform: translateY(-1px);
+  box-shadow: var(--camp-shadow-lift);
+}
+/* Status accent — a slim left edge that carries the row's state color. */
+.camp-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--camp-row-accent, transparent);
+}
+.camp-row[data-accent="active"] { --camp-row-accent: hsl(155 62% 45%); }
+.camp-row[data-accent="paused"] { --camp-row-accent: hsl(38 92% 52%); }
+.camp-row[data-accent="draft"] { --camp-row-accent: var(--camp-purple); }
+.camp-row[data-accent="attention"] { --camp-row-accent: hsl(24 94% 54%); }
+
+/* Compact stat chips on rows (sent / open / click / replies). */
+.camp-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--camp-muted);
+}
+.camp-stat strong {
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--camp-text);
+}
+.camp-stat--hot strong {
+  color: var(--camp-accent-text);
+}
+
+/* ── Dialog / wizard shell ──────────────────────────────────────────── */
+/* Applied to DialogContent together with .camp-scope. Solid surface, its
+   own padding rhythm — never dependent on the page scope again. */
+.camp-shell {
+  background: var(--camp-surface);
+  color: var(--camp-text);
+  border: 1px solid var(--camp-line);
+  border-radius: 1.25rem;
+  box-shadow: 0 24px 70px hsl(258 45% 20% / 0.28);
+  /* No padding here on purpose: unlayered padding would override every
+     dialog's own p-* utility (the Sending-inboxes margin bug, 8/19).
+     Each dialog controls its padding with utilities. */
+}
+.dark .camp-shell {
+  box-shadow: 0 24px 70px hsl(250 40% 3% / 0.65);
+}
+/* Light mode: the shell floats on a faint aurora of its own so the big
+   builder reads like the mockup card, not a bare white sheet. */
+.camp-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 55% at 100% -20%, hsl(266 85% 97% / 0.9), transparent 50%),
+    radial-gradient(90% 45% at 0% -10%, hsl(330 85% 97.5% / 0.8), transparent 45%);
+}
+.dark .camp-shell::before {
+  background:
+    radial-gradient(120% 55% at 100% -20%, hsl(266 60% 30% / 0.14), transparent 52%),
+    radial-gradient(90% 45% at 0% -10%, hsl(330 55% 32% / 0.1), transparent 47%);
+}
+/* Keep content above the ::before glow — but never touch the shared
+   dialog close button: forcing it relative knocks its absolute top-right
+   anchor into flow (the bottom-left X bug, 8/19). */
+.camp-shell > :not([data-slot="dialog-close"]) {
+  position: relative;
+}
+
+/* Templates manager dialog sizing — wide, internally scrolling. */
+.camp-templates-dialog {
+  width: min(56rem, calc(100vw - 2rem));
+  max-width: min(56rem, calc(100vw - 2rem));
+  max-height: min(88vh, calc(100dvh - 2rem));
+  min-width: 0;
+}
+.camp-templates-dialog .camp-templates-body {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* Headroom so the first tile row's hover lift + border glow isn't
+     clipped by this scroll container's top edge (Nathan 8/19 round 3). */
+  padding-top: 0.375rem;
+}
+.camp-templates-dialog .camp-templates-body .grid {
+  min-width: 0;
+  width: 100%;
+}
+
+/* Wizard step heading — the mockups' friendly step identity. */
+.camp-step-kicker {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--camp-accent-text);
+}
+.camp-step-title {
+  font-size: 1.35rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  color: var(--camp-text);
+  line-height: 1.2;
+}
+
+/* Stepper pills (1 Build · 2 People · 3 Review). */
+.camp-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--camp-surface-2);
+  border: 1px solid var(--camp-line);
+  border-radius: 9999px;
+  padding: 0.25rem;
+}
+.camp-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 9999px;
+  padding: 0.25rem 0.7rem 0.25rem 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 550;
+  color: var(--camp-muted);
+}
+.camp-step[data-state="current"] {
+  background: var(--camp-surface);
+  color: var(--camp-text);
+  box-shadow: 0 1px 3px hsl(260 30% 30% / 0.12);
+}
+.camp-step-num {
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--camp-muted);
+  border: 1px solid var(--camp-line-strong);
+  background: var(--camp-surface);
+}
+.camp-step[data-state="current"] .camp-step-num {
+  background-image: var(--camp-gradient);
+  border-color: transparent;
+  color: #fff;
+}
+.camp-step[data-state="done"] .camp-step-num {
+  background: var(--camp-tint-strong);
+  border-color: transparent;
+  color: var(--camp-accent-text);
+}
+
+/* ── Start-method cards (Use a template / Draft with AI / Write my own) */
+.camp-methods {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+@media (max-width: 640px) {
+  .camp-methods {
+    grid-template-columns: 1fr;
+  }
+}
+.camp-method {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  min-width: 0;
+  text-align: left;
+  background: var(--camp-surface);
+  border: 1px solid var(--camp-line);
+  border-radius: 1rem;
+  padding: 1rem;
+  cursor: pointer;
+  box-shadow: 0 1px 2px hsl(260 30% 30% / 0.05);
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.camp-method:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--camp-purple) 50%, var(--camp-line));
+  box-shadow: var(--camp-shadow-lift);
+}
+.camp-method:focus-visible {
+  outline: 2px solid var(--camp-purple);
+  outline-offset: 2px;
+}
+.camp-method[data-selected="true"] {
+  border: 2px solid transparent;
+  padding: calc(1rem - 1px);
+  background-image:
+    linear-gradient(var(--camp-tint), var(--camp-surface)),
+    var(--camp-gradient);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: 0 10px 26px hsl(292 70% 55% / 0.16);
+}
+.camp-method strong {
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: var(--camp-text);
+}
+.camp-method small {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--camp-muted);
+}
+
+/* Colored icon chips (mockup style). */
+.camp-icon-chip {
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 0.65rem;
+  margin-bottom: 0.55rem;
+  color: var(--camp-accent-text);
+  background: var(--camp-tint-strong);
+}
+.camp-method[data-method="ai"] .camp-icon-chip {
+  color: hsl(330 75% 48%);
+  background: hsl(330 85% 95.5%);
+}
+.camp-method[data-method="choose"] .camp-icon-chip {
+  color: hsl(196 80% 34%);
+  background: hsl(196 75% 93%);
+}
+.dark .camp-icon-chip {
+  background: hsl(264 32% 26%);
+  color: hsl(266 90% 84%);
+}
+.dark .camp-method[data-method="ai"] .camp-icon-chip {
+  background: hsl(330 34% 25%);
+  color: hsl(330 90% 82%);
+}
+.dark .camp-method[data-method="choose"] .camp-icon-chip {
+  background: hsl(198 40% 22%);
+  color: hsl(196 85% 74%);
+}
+
+/* ── Inputs inside campaign surfaces ────────────────────────────────── */
+/* Purple focus ring for cohesion; only within campaign scopes. */
+.camp-scope input:focus-visible,
+.camp-scope textarea:focus-visible,
+.camp-scope [role="combobox"]:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--camp-purple) 55%, var(--camp-line)) !important;
+  box-shadow: 0 0 0 3px hsl(268 78% 62% / 0.22) !important;
+}
+
+/* Review checklist rows (mockup's Campaign / People / Delivery card). */
+.camp-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.85rem 0.25rem;
+}
+.camp-check + .camp-check {
+  border-top: 1px solid var(--camp-line);
+}
+.camp-check-dot {
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  background: var(--camp-tint-strong);
+  color: var(--camp-accent-text);
+}
+.camp-check-dot[data-ok="true"] {
+  background: hsl(155 60% 92%);
+  color: hsl(155 65% 32%);
+}
+.dark .camp-check-dot[data-ok="true"] {
+  background: hsl(155 45% 20%);
+  color: hsl(155 70% 68%);
+}
+.camp-check-dot[data-ok="false"] {
+  background: hsl(38 95% 91%);
+  color: hsl(30 85% 40%);
+}
+.dark .camp-check-dot[data-ok="false"] {
+  background: hsl(38 55% 22%);
+  color: hsl(40 95% 68%);
+}
+
+/* Tiny link-style action (Edit, Show handled…). */
+.camp-link {
+  font-size: 0.78rem;
+  font-weight: 550;
+  color: var(--camp-accent-text);
+  border-radius: 0.35rem;
+  padding: 0.1rem 0.2rem;
+  cursor: pointer;
+  transition: color 0.13s ease, background-color 0.13s ease;
+}
+.camp-link:hover {
+  background: var(--camp-tint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .camp-btn-primary,
+  .camp-btn,
+  .camp-method,
+  .camp-row {
+    transition: none;
+  }
+  .camp-btn-primary:hover:not(:disabled),
+  .camp-btn:hover:not(:disabled),
+  .camp-method:hover,
+  .camp-row--clickable:hover {
+    transform: none;
+  }
+}

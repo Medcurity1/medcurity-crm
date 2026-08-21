@@ -957,7 +957,11 @@ export interface Notification {
     // Hand-offs (survey T5). Produced entirely by DB triggers on
     // owner_user_id — see 20260817140000_assignment_notifications.sql.
     | "record_assigned"
-    | "task_assigned";
+    | "task_assigned"
+    // Daily reminder while "Assign the assessor" tasks are open —
+    // produced by notify_assessor_tasks_open() on the daily cron
+    // (20260821190000_assessor_optional_with_followup.sql).
+    | "assessor_needed";
   title: string;
   message: string | null;
   link: string | null;

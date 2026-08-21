@@ -1,14 +1,14 @@
 // Replies feed — recent reply campaign_events (Campaigns overhaul S7;
 // extended S9 with a reply-category badge, an "Open contact" link, and
 // "Mark handled" so a reply doesn't require opening Smartlead to notice OR
-// to triage). Sits between the template gallery and the Ongoing/Recently
-// ended tracker in CampaignsTab.tsx, same border-t/h3 rhythm as those
-// sections, collapsible (defaults open) since it's read-only and one more
-// thing on the page.
+// to triage). Independently collapsible with the other Campaigns home
+// groups; expanded by default when nonempty, user-toggleable.
 
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, MessageSquareText } from "lucide-react";
+import { MessageSquareText } from "lucide-react";
+import { campaignGroupOpen } from "./campaign-groups";
+import { CampaignSectionHeader } from "./CampaignSection";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,7 +70,7 @@ function ReplyRow({
   const positive = isPositiveReplyCategory(category);
 
   return (
-    <div className={cn("rounded-md border p-3 space-y-1", handled && "opacity-60")}>
+    <div className={cn("camp-row p-3 pl-4 space-y-1", handled && "opacity-60")}>
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-sm font-medium">
           {replyWho(row)}
@@ -160,13 +160,27 @@ function ReplyRow({
 }
 
 export function CampaignReplies() {
-  const [open, setOpen] = useState(true);
+  const [openOverride, setOpenOverride] = useState<boolean | undefined>(undefined);
   const [handledOpen, setHandledOpen] = useState(false);
   const { data: replies, isLoading, isError, refetch } = useCampaignReplies();
   const markHandled = useMarkReplyHandled();
   const logCall = useLogReplyCall();
   const { profile } = useAuth();
-  const count = replies?.length ?? 0;
+
+  const { active, handled } = useMemo(() => {
+    const active: CampaignReplyRow[] = [];
+    const handled: CampaignReplyRow[] = [];
+    for (const row of replies ?? []) {
+      (handledInfo(row) ? handled : active).push(row);
+    }
+    return { active, handled };
+  }, [replies]);
+
+  // The badge counts only UNHANDLED replies (Nathan 8/19): a handled reply
+  // asks nothing of anyone, so it neither inflates the number nor holds
+  // the section open — it waits behind "Show handled" instead.
+  const count = active.length;
+  const open = campaignGroupOpen("replies", isLoading ? 1 : count, false, openOverride);
   // Rows whose call has already been logged this session — the button
   // becomes a static "Call logged" so a second click can't write a second
   // call row (adversarial review). loggingRowId keys the in-flight spinner
@@ -193,30 +207,19 @@ export function CampaignReplies() {
     );
   }
 
-  const { active, handled } = useMemo(() => {
-    const active: CampaignReplyRow[] = [];
-    const handled: CampaignReplyRow[] = [];
-    for (const row of replies ?? []) {
-      (handledInfo(row) ? handled : active).push(row);
-    }
-    return { active, handled };
-  }, [replies]);
-
   return (
-    <div className="border-t pt-4 space-y-3">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-2 text-left"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <h3 className="text-sm font-semibold">
-          Replies{count > 0 ? ` (${count})` : ""}
-        </h3>
-        <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
-      </button>
+    <section data-campaigns-group="replies">
+      <CampaignSectionHeader
+        title="Replies"
+        count={isLoading ? "…" : count}
+        open={open}
+        onToggle={() => setOpenOverride(!open)}
+        icon={<MessageSquareText className="h-4 w-4 text-muted-foreground" />}
+      />
 
       {open && (
+        <div className="space-y-2 pt-2">
+        {
         isLoading ? (
           <div className="space-y-2">
             {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
@@ -280,7 +283,9 @@ export function CampaignReplies() {
             )}
           </div>
         )
+        }
+        </div>
       )}
-    </div>
+    </section>
   );
 }

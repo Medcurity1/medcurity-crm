@@ -3,18 +3,18 @@
 // queued in campaign_suggestions), grouped by template, with Apply/Dismiss.
 // Applying edits the TEMPLATE only — a launched campaign's steps are a
 // frozen snapshot, so nothing here ever touches a running campaign. Mirrors
-// TrainingPanel.tsx's Sheet structure.
+// TrainingPanel.tsx's dialog structure.
 
 import { useMemo, useState } from "react";
 import { Check, X, Lightbulb, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -276,21 +276,21 @@ export function InsightsPanel({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle className="flex items-center gap-2">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="camp-scope camp-shell sm:max-w-2xl max-h-[85vh] overflow-y-auto p-6 gap-4">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
             <Lightbulb className="h-4 w-4" />
             Insights
-          </SheetTitle>
-          <SheetDescription>
+          </DialogTitle>
+          <DialogDescription>
             What the AI noticed in your campaigns, with suggested changes to
             the templates they came from. Applying a suggestion only edits
             the template. Campaigns already running are never touched.
-          </SheetDescription>
-        </SheetHeader>
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="space-y-4 px-4 pb-4">
+        <div className="space-y-4">
           {isLoading ? (
             Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)
           ) : isError ? (
@@ -359,7 +359,7 @@ export function InsightsPanel({
             </div>
           )}
         </div>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }

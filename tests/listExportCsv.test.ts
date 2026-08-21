@@ -251,3 +251,44 @@ describe("hydrateInChunks", () => {
     expect(called).toBe(false);
   });
 });
+
+// ── defaultHidden columns (Summer 8/19: the Expected Close column) ────
+
+import { computeHiddenKeys } from "@/features/list-columns/useColumnPrefs";
+import type { ColumnDescriptor } from "@/features/list-columns/columns";
+
+describe("computeHiddenKeys (defaultHidden + shown allow-list)", () => {
+  const cols: ColumnDescriptor[] = [
+    { key: "select", label: "Select", locked: true },
+    { key: "name", label: "Name", locked: true },
+    { key: "amount", label: "Amount" },
+    { key: "expected_close_forecast", label: "Expected Close", defaultHidden: true },
+  ];
+
+  it("hides defaultHidden columns until the user shows them", () => {
+    expect([...computeHiddenKeys(cols, undefined)]).toEqual(["expected_close_forecast"]);
+    expect([...computeHiddenKeys(cols, { hidden: [] })]).toEqual(["expected_close_forecast"]);
+  });
+
+  it("an explicit shown entry overrides defaultHidden; deny-list still works", () => {
+    const hidden = computeHiddenKeys(cols, { hidden: ["amount"], shown: ["expected_close_forecast"] });
+    expect(hidden.has("expected_close_forecast")).toBe(false);
+    expect(hidden.has("amount")).toBe(true);
+  });
+
+  it("ignores stale keys and never hides locked columns", () => {
+    const hidden = computeHiddenKeys(cols, { hidden: ["gone", "name"], shown: ["also-gone"] });
+    expect(hidden.has("name")).toBe(false);
+    expect(hidden.has("gone")).toBe(false);
+    expect(hidden.has("expected_close_forecast")).toBe(true);
+  });
+
+  it("the Opportunities registry carries Expected Close as opt-in", () => {
+    const src = require("fs").readFileSync(
+      require("path").resolve(__dirname, "..", "src", "features", "opportunities", "OpportunitiesList.tsx"),
+      "utf8",
+    );
+    expect(src).toMatch(/key: "expected_close_forecast", label: "Expected Close", sortKey: "expected_close_date", defaultHidden: true/);
+    expect(src).toMatch(/expected_close_forecast: \(o\) => csvDate\(o\.expected_close_date/);
+  });
+});

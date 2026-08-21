@@ -53,6 +53,7 @@ export const fetchCampaignById = (id: number | string) => smartleadFetch(`/campa
 export const fetchCampaignAnalytics = (id: number | string) => smartleadFetch(`/campaigns/${id}/analytics`);
 export const fetchCampaignSequences = (id: number | string) => smartleadFetch(`/campaigns/${id}/sequences`);
 export const fetchEmailAccounts = () => smartleadFetch("/email-accounts");
+export const fetchEmailAccountById = (id: number | string) => smartleadFetch(`/email-accounts/${id}/`);
 
 /** Extract metrics from a Smartlead analytics response (server.js:3857). */
 export function buildSmartleadMetrics(analytics: Record<string, unknown> | null): Record<string, string> {

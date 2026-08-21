@@ -16,6 +16,7 @@ import type {
 import { normalizeEmail, type SuppressionEntry } from "./suppression";
 import { isPositiveReplyCategory } from "./reply-extract";
 import { touchEventBucket, postEnrollmentDeal, influenceTotals, type InfluenceDeal } from "./campaign-metrics";
+import { formatSmartleadRefreshToast } from "./campaign-sync-copy";
 import type { LeadList } from "@/types/crm";
 import { buildSmartQuery, parseSmartRules, smartRulesEmpty } from "@/features/lead-lists/lead-lists-api";
 
@@ -375,7 +376,7 @@ export function useSmartleadStatus() {
   });
 }
 
-function useSmartleadAction(action: "import" | "sync") {
+function useSmartleadAction(action: "import" | "sync" | "refresh") {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
@@ -384,15 +385,19 @@ function useSmartleadAction(action: "import" | "sync") {
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      return data as { created?: number; updated?: number; total?: number; synced?: number };
+      return data as {
+        created?: number; updated?: number; total?: number; synced?: number;
+        capped?: number; enrollments_updated?: number; enrollments_deferred?: number;
+        tasks_cancelled?: number;
+      };
     },
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
-      if (action === "import") {
-        toast.success(`Imported ${r.created ?? 0} new, refreshed ${r.updated ?? 0}.`);
-      } else {
-        toast.success(`Synced ${r.synced ?? 0} campaigns.`);
-      }
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-enrollments"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-enrollment-stats"] });
+      const copy = formatSmartleadRefreshToast(r);
+      if (copy.warning) toast.warning(copy.message, { duration: 8000 });
+      else toast.success(copy.message);
     },
     onError: (e) => toast.error(`Smartlead ${action} failed: ` + (e as Error).message),
   });
@@ -400,6 +405,7 @@ function useSmartleadAction(action: "import" | "sync") {
 
 export const useImportCampaigns = () => useSmartleadAction("import");
 export const useSyncCampaigns = () => useSmartleadAction("sync");
+export const useRefreshSmartlead = () => useSmartleadAction("refresh");
 
 /** Delete a campaign (Smartlead + Pulse). Used to discard a draft. */
 export function useDeleteCampaign() {
@@ -536,6 +542,10 @@ export interface InboxHealthEntry {
   } | null;
   campaigns: Array<{ id: string; name: string; leads_per_day: number; status: string }>;
   total_leads_per_day: number;
+  /** Exact Smartlead account signature; null means the account detail read did not expose one. */
+  signature: string | null;
+  warmup_enabled: boolean | null;
+  account_status: string | null;
 }
 
 /** Lazy — only fires while `enabled` (the Sending Inboxes dialog is open, or
@@ -554,6 +564,39 @@ export function useInboxHealth(enabled: boolean) {
       return (data?.inboxes ?? []) as InboxHealthEntry[];
     },
     staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function useUpdateEmailAccountSignature() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ emailAccountId, signature }: { emailAccountId: number; signature: string }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "update-email-account-signature", email_account_id: emailAccountId, signature },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { success: true; signature: string };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "inbox-health"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "email-accounts"] });
+    },
+  });
+}
+
+export function useUpdateEmailAccountDailyLimit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ emailAccountId, dailyLimit }: { emailAccountId: number; dailyLimit: number }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "update-email-account-daily-limit", email_account_id: emailAccountId, daily_limit: dailyLimit },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { success: true; daily_limit: number };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["playbook", "inbox-health"] }),
   });
 }
 

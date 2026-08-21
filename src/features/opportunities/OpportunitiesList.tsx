@@ -104,6 +104,12 @@ const OPPORTUNITIES_COLUMNS: ColumnDescriptor[] = [
   // "expected_close" so saved column preferences keep working. A separate
   // Close Date column was removed earlier (Summer) as near-always redundant.
   { key: "expected_close", label: "Close Date", sortKey: "expected_close_date" },
+  // Summer 8/19: the expected close date as its OWN column, off by default
+  // (opt-in via the Columns picker) so it never re-imposes the redundant
+  // duplicate she had removed pre-8/3. Open deals: same forecast the
+  // double-duty column shows. Closed deals: the FROZEN pre-close forecast,
+  // next to the actual landing date — forecast accuracy at a glance.
+  { key: "expected_close_forecast", label: "Expected Close", sortKey: "expected_close_date", defaultHidden: true },
   { key: "owner", label: "Owner", sortKey: "owner.full_name" },
   { key: "next_step", label: "Next Step" },
   // "Rotting deals" (Summer): days since the last real touch on the deal,
@@ -132,6 +138,7 @@ const OPPORTUNITY_EXPORT_VALUES: ExportValueMap<Opportunity> = {
     o.stage === "closed_won" || o.stage === "closed_lost"
       ? csvDate(o.close_date ?? o.expected_close_date, formatDate)
       : csvDate(o.expected_close_date, formatDate),
+  expected_close_forecast: (o) => csvDate(o.expected_close_date, formatDate),
   owner: (o) => o.owner?.full_name ?? "Unassigned",
   next_step: (o) => csvText(o.next_step),
   // Same fallback the badge uses: no logged activity => age since created.
@@ -850,6 +857,14 @@ export function OpportunitiesList() {
         <InlineField o={o} field="expected_close_date" kind="date"
           display={<span className="text-muted-foreground">{o.expected_close_date ? formatDate(o.expected_close_date) : "—"}</span>} />
       ),
+    // Read-only on purpose: the double-duty Close Date column already
+    // inline-edits the forecast on open deals, and a closed deal's expected
+    // date is a frozen record.
+    expected_close_forecast: (o) => (
+      <span className="text-muted-foreground">
+        {o.expected_close_date ? formatDate(o.expected_close_date) : "—"}
+      </span>
+    ),
     owner: (o) => (
       <span className="text-muted-foreground">{o.owner?.full_name ?? "Unassigned"}</span>
     ),

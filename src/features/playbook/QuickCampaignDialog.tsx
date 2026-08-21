@@ -100,7 +100,7 @@ export function QuickCampaignDialog({
   return (
     <>
       <Dialog open={open && !launchOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="camp-scope camp-shell sm:max-w-lg max-h-[85vh] overflow-y-auto p-6">
           <DialogHeader>
             <DialogTitle>Start a campaign</DialogTitle>
             <DialogDescription>
@@ -151,19 +151,21 @@ export function QuickCampaignDialog({
                     <button
                       type="button"
                       key={t.id}
-                      className="rounded-xl border bg-card text-card-foreground shadow-sm text-left cursor-pointer hover:shadow-md hover:border-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-all overflow-hidden"
+                      className="camp-row camp-row--clickable w-full text-left"
                       onClick={() => pickTemplate(t)}
                     >
                       <div className={cn("h-1 w-full bg-gradient-to-r", cat.accent)} />
-                      <div className="p-3 space-y-1.5">
+                      <div className="p-3 space-y-1.5 min-w-0">
                         <div className="flex items-center gap-2">
                           <div className={cn("h-6 w-6 rounded-md flex items-center justify-center shrink-0", cat.chip)}>
                             <Icon className="h-3.5 w-3.5" />
                           </div>
                           <h4 className="font-semibold text-sm truncate">{t.name}</h4>
                         </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <SequenceMiniPreview steps={t.steps} />
+                        <div className="flex items-center justify-between gap-2 min-w-0">
+                          <div className="min-w-0 overflow-hidden">
+                            <SequenceMiniPreview steps={t.steps} />
+                          </div>
                           <span className="text-[11px] text-muted-foreground inline-flex items-center gap-2 shrink-0">
                             <span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />{t.step_count ?? t.steps.length}</span>
                             {t.duration_days != null && (
