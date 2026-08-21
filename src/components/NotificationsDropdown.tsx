@@ -14,6 +14,7 @@ import {
   Info,
   PhoneCall,
   Trash2,
+  UserCheck,
   UserPlus,
   X,
 } from "lucide-react";
@@ -47,6 +48,7 @@ const typeIcon: Record<Notification["type"], ComponentType<{ className?: string 
   follow_up_due: PhoneCall,
   record_assigned: UserPlus,
   task_assigned: ClipboardList,
+  assessor_needed: UserCheck,
 };
 
 const typeColor: Record<Notification["type"], string> = {
@@ -67,6 +69,7 @@ const typeColor: Record<Notification["type"], string> = {
   // something" reads as a single family in the bell list.
   record_assigned: "text-fuchsia-600 dark:text-fuchsia-400",
   task_assigned: "text-fuchsia-600 dark:text-fuchsia-400",
+  assessor_needed: "text-cyan-600 dark:text-cyan-400",
 };
 
 export function NotificationsDropdown() {

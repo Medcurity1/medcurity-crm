@@ -105,6 +105,15 @@ export const CRM_NOTIF_TYPES: NotifTypeDef[] = [
     defSound: "felt",
     defDuration: 5,
   },
+  // Off-switch read by notify_assessor_tasks_open()
+  // (20260821190000, coalesce(prefs->>'assessor_needed', true)).
+  {
+    key: "assessor_needed",
+    label: "Assessor needed",
+    desc: "Daily reminder while service deals are missing an Assigned Assessor",
+    defSound: "lantern",
+    defDuration: 5,
+  },
   {
     key: "deal_high_five",
     label: "High fives",

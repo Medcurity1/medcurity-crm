@@ -95,6 +95,8 @@ export const NOTIF_TYPE_FALLBACK_SOUNDS: Record<string, string> = {
   record_assigned: "quill",
   task_assigned: "felt",
   follow_up_due: "lantern",
+  // A task nag, so it sounds like the task family.
+  assessor_needed: "lantern",
 };
 
 /** Saved seconds value → repeat-duration bucket (Nexus index.html:12239). */
