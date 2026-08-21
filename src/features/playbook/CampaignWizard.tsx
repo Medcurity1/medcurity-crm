@@ -10,8 +10,8 @@
 // Recipients come from a contact tag, a CSV upload, or pasted emails; Launch
 // creates the campaign in Smartlead AND enrolls every recipient
 // (campaign_enrollments) — see playbook-smartlead/index.ts's `launch`
-// action. autoStart defaults OFF in AI mode (review the Smartlead draft
-// first) and ON in template mode (a template is already proven copy).
+// action. New campaigns default to starting after the final explicit launch
+// confirmation; Save as draft remains a deliberate Review-step choice.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -252,10 +252,9 @@ export function CampaignWizard({
   // tasks and reply alerts still go to each person's own account owner; this
   // only covers people without one. See the Select in Step 4.
   const [ownerId, setOwnerId] = useState(profile?.id ?? "");
-  // Template mode defaults ON (a template is already-proven copy someone
-  // just wants running); AI mode defaults OFF (review the Smartlead draft
-  // before it sends anything the AI just wrote).
-  const [autoStart, setAutoStart] = useState(mode === "template");
+  // Every new path defaults to starting only after the explicit final
+  // confirmation. Review still offers Save as draft as a deliberate choice.
+  const [autoStart, setAutoStart] = useState(true);
   const [adaptive, setAdaptive] = useState(false);
   const [leadsPerDay, setLeadsPerDay] = useState(25);
   const [minGap, setMinGap] = useState(15);
@@ -264,6 +263,7 @@ export function CampaignWizard({
   const [sendEnd, setSendEnd] = useState(DEFAULT_DELIVERY_SETTINGS.endHour);
   const [sendTimezone, setSendTimezone] = useState(DEFAULT_DELIVERY_SETTINGS.timezone);
   const [advancedDeliveryOpen, setAdvancedDeliveryOpen] = useState(false);
+  const deliveryBaselineRef = useRef<DeliverySettings | null>(null);
   const [launchResult, setLaunchResult] = useState<{
     id: number; started: boolean; leads: number; failed: number;
     suppressionDropped: number; alreadyEnrolledDropped: number; enrolled: number; tasksCreated: number;
@@ -374,6 +374,28 @@ export function CampaignWizard({
     campaignDailyVolume: effectiveLeadsPerDay,
     messageSpacingMinutes: minGap,
   }), [sendDays, sendStart, sendEnd, sendTimezone, effectiveLeadsPerDay, minGap]);
+
+  function openDeliveryEditor() {
+    deliveryBaselineRef.current = { ...deliverySettings, campaignDailyVolume: leadsPerDay, daysOfWeek: [...deliverySettings.daysOfWeek] };
+    setSettingsOpen(true);
+  }
+  function keepDeliveryEdits() {
+    deliveryBaselineRef.current = null;
+    setSettingsOpen(false);
+    setAdvancedDeliveryOpen(false);
+  }
+  function cancelDeliveryEdits() {
+    const baseline = deliveryBaselineRef.current;
+    if (baseline) {
+      setSendDays(baseline.daysOfWeek);
+      setSendStart(baseline.startHour);
+      setSendEnd(baseline.endHour);
+      setSendTimezone(baseline.timezone);
+      setLeadsPerDay(baseline.campaignDailyVolume);
+      setMinGap(baseline.messageSpacingMinutes);
+    }
+    keepDeliveryEdits();
+  }
 
   const rampProjection = useMemo(
     () => (templateSteps.length ? projectSendRamp(templateSteps, effectiveLeadsPerDay, sendableRecipients.length) : null),
@@ -503,7 +525,7 @@ export function CampaignWizard({
     setActiveEnrollments([]); setEnrollmentOverrides([]);
     setRecipientChecksPending(hasLockedRecipients);
     setRecipientChecksFailed(false);
-    setAutoStart(mode === "template"); setAdaptive(false); setLeadsPerDay(25); setMinGap(15); setLaunchResult(null);
+    setAutoStart(true); setAdaptive(false); setLeadsPerDay(25); setMinGap(15); setLaunchResult(null);
     setTemplateName(templateSeed?.name ?? "");
     setTemplateSteps(templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : []);
     setFlow(mode === "template" ? "template" : "choose");
@@ -835,7 +857,7 @@ export function CampaignWizard({
                             setFlow("template");
                             if (!customSequence) setTemplateSteps(recommendedCustomSequence());
                             setCustomSequence(true);
-                            setAutoStart(false);
+                            setAutoStart(true);
                             setEditingSequence(false);
                           } else if (id === "template") {
                             setFlow("template");
@@ -845,7 +867,7 @@ export function CampaignWizard({
                             setTemplateSteps(templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : []);
                           } else {
                             setFlow("ai");
-                            setAutoStart(false);
+                            setAutoStart(true);
                             setEditingSequence(false);
                           }
                         }}
@@ -1260,19 +1282,18 @@ export function CampaignWizard({
                           Recommended defaults are ready to use. Follow-up timing stays with the sequence above.
                         </p>
                       </div>
-                      <button type="button" className="camp-btn shrink-0 text-xs" onClick={() => setSettingsOpen((v) => !v)}>
-                        {settingsOpen ? "Done" : "Edit delivery settings"}
+                      <button type="button" className="camp-btn shrink-0 text-xs" onClick={settingsOpen ? keepDeliveryEdits : openDeliveryEditor}>
+                        {settingsOpen ? "Keep changes" : "Edit delivery settings"}
                       </button>
                     </div>
-                  </div>
                   {settingsOpen && (
-                  <div className="camp-card p-4 space-y-4">
+                  <div className="mt-3 border-t pt-4 space-y-4" style={{ borderColor: "var(--camp-line)" }}>
                     <div className="space-y-2">
                       <div>
                         <Label className="text-xs">Sending days</Label>
                         <p className="text-[11px] text-muted-foreground">Choose the days Pulse may send campaign emails.</p>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Campaign sending days">
                         {DELIVERY_DAY_OPTIONS.map((day) => {
                           const active = sendDays.includes(day.value);
                           return (
@@ -1280,7 +1301,7 @@ export function CampaignWizard({
                               key={day.value}
                               type="button"
                               aria-pressed={active}
-                              className={cn("camp-btn h-8 min-w-11 text-xs", active && "camp-btn-primary")}
+                              className="camp-pill h-9 min-w-12 justify-center border"
                               onClick={() => setSendDays((current) => active
                                 ? (current.length > 1 ? current.filter((value) => value !== day.value) : current)
                                 : [...current, day.value])}
@@ -1331,18 +1352,27 @@ export function CampaignWizard({
                         <p className="text-[11px] text-muted-foreground">A deliverability safeguard inside a sending window. This is not the delay between follow-ups; that cadence is set in the sequence.</p>
                       </div>
                     )}
-                    <div className="space-y-1">
-                      <Label className="text-xs">Campaign owner</Label>
-                      <Select value={ownerId} onValueChange={setOwnerId}>
-                        <SelectTrigger><SelectValue placeholder="Pick an owner…" /></SelectTrigger>
-                        <SelectContent>
-                          {(activeUsers ?? []).map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name ?? u.id}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">Tasks and reply alerts go to each person's owner. This covers people without one.</p>
+                    <div className="rounded-xl border px-3 py-2 text-[11px] text-muted-foreground" style={{ borderColor: "var(--camp-line)", background: "var(--camp-surface-2)" }}>
+                      These changes stay in this campaign builder until you launch or save the campaign as a draft. Nothing is saved to Smartlead from this editor.
+                    </div>
+                    <div className="flex flex-col-reverse gap-2 border-t pt-3 sm:flex-row sm:justify-end" style={{ borderColor: "var(--camp-line)" }}>
+                      <button type="button" className="camp-btn justify-center" onClick={cancelDeliveryEdits}>Cancel changes</button>
+                      <button type="button" className="camp-btn-primary justify-center" onClick={keepDeliveryEdits}>Use these delivery settings</button>
                     </div>
                   </div>
                   )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Campaign owner</Label>
+                    <Select value={ownerId} onValueChange={setOwnerId}>
+                      <SelectTrigger><SelectValue placeholder="Pick an owner…" /></SelectTrigger>
+                      <SelectContent>
+                        {(activeUsers ?? []).map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name ?? u.id}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Tasks and reply alerts go to each person's owner. This covers people without one.</p>
+                  </div>
 
                   <div className="space-y-1">
                     <Label className="text-xs">Sending inbox</Label>
@@ -1500,9 +1530,9 @@ export function CampaignWizard({
           outer button's own gating (aiEmailsIncomplete, smartleadDisabled,
           launch.isPending) still applies before this can even open. */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="camp-scope camp-shell sm:max-w-lg">
           <AlertDialogHeader>
-            <AlertDialogTitle>Ready to launch?</AlertDialogTitle>
+            <AlertDialogTitle>{autoStart ? "Ready to start sending?" : "Save this campaign as a draft?"}</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-1.5 text-left text-sm">
                 <p>{sendableRecipients.length} {sendableRecipients.length === 1 ? "person" : "people"} will be added</p>
@@ -1522,8 +1552,8 @@ export function CampaignWizard({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={smartleadDisabled || !copyReady || !audienceReady || !deliveryReady || !senderReady || launch.isPending} onClick={doLaunch}>
+            <AlertDialogCancel>Go back</AlertDialogCancel>
+            <AlertDialogAction className="camp-btn-primary" disabled={smartleadDisabled || !copyReady || !audienceReady || !deliveryReady || !senderReady || launch.isPending} onClick={doLaunch}>
               {autoStart
                 ? `Launch to ${sendableRecipients.length} ${sendableRecipients.length === 1 ? "person" : "people"}`
                 : `Save draft for ${sendableRecipients.length} ${sendableRecipients.length === 1 ? "person" : "people"}`}

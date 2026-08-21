@@ -2423,6 +2423,8 @@ interface InboxHealthEntry {
   campaigns: InboxHealthCampaignSummary[];
   total_leads_per_day: number;
   signature: string | null;
+  warmup_enabled: boolean | null;
+  account_status: string | null;
 }
 
 function extractAccountSignature(account: Record<string, unknown>): string | null {
@@ -2440,6 +2442,15 @@ function unwrapEmailAccountDetail(value: unknown): Record<string, unknown> | nul
     if (typeof row[key] === "object" && row[key] !== null) return row[key] as Record<string, unknown>;
   }
   return row;
+}
+
+function firstBoolean(...values: unknown[]): boolean | null {
+  for (const value of values) {
+    if (typeof value === "boolean") return value;
+    if (value === 1 || value === "1" || value === "true") return true;
+    if (value === 0 || value === "0" || value === "false") return false;
+  }
+  return null;
 }
 
 // firstNumber lives in _shared/smartlead-sync.ts (extracted 2026-07-31,
@@ -2578,6 +2589,9 @@ async function inboxHealth(): Promise<{ inboxes: InboxHealthEntry[] }> {
       ])
       : [null, null];
     const detailedAccount = unwrapEmailAccountDetail(accountDetail) ?? a;
+    const warmupConfig = typeof detailedAccount.warmup === "object" && detailedAccount.warmup !== null
+      ? detailedAccount.warmup as Record<string, unknown>
+      : {};
     return {
       id,
       from_email: typeof a.from_email === "string" ? a.from_email : null,
@@ -2587,6 +2601,14 @@ async function inboxHealth(): Promise<{ inboxes: InboxHealthEntry[] }> {
       campaigns,
       total_leads_per_day: totalLeadsPerDay,
       signature: extractAccountSignature(detailedAccount),
+      warmup_enabled: firstBoolean(
+        detailedAccount.warmup_enabled,
+        detailedAccount.is_warmup_enabled,
+        warmupConfig.enabled,
+      ),
+      account_status: typeof detailedAccount.status === "string"
+        ? detailedAccount.status
+        : typeof detailedAccount.connection_status === "string" ? detailedAccount.connection_status : null,
     };
   }));
 
@@ -2608,6 +2630,22 @@ async function updateEmailAccountSignature(emailAccountId: unknown, signature: u
   const actual = extractAccountSignature(row);
   if (actual !== signature) throw new Error("Smartlead did not confirm the updated signature. Refresh and try again.");
   return { success: true, signature: actual };
+}
+
+async function updateEmailAccountDailyLimit(emailAccountId: unknown, dailyLimit: unknown): Promise<{ success: true; daily_limit: number }> {
+  const id = Number(emailAccountId);
+  const limit = Number(dailyLimit);
+  if (!Number.isInteger(id) || id <= 0) throw new Error("Choose a valid sending inbox.");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("Daily limit must be a whole number from 1 to 500.");
+  await smartleadFetch(`/email-accounts/${id}`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ max_email_per_day: limit }),
+  });
+  const refreshed = unwrapEmailAccountDetail(await fetchEmailAccountById(id)) ?? {};
+  const actual = extractDailyLimit(refreshed);
+  if (actual !== limit) throw new Error("Smartlead did not confirm the updated daily limit. Refresh and try again.");
+  return { success: true, daily_limit: actual };
 }
 
 // ============================================================
@@ -3762,6 +3800,9 @@ Deno.serve(async (req) => {
     if (action === "inbox-health") return json(await inboxHealth());
     if (action === "update-email-account-signature") {
       return json(await updateEmailAccountSignature(body.email_account_id, body.signature));
+    }
+    if (action === "update-email-account-daily-limit") {
+      return json(await updateEmailAccountDailyLimit(body.email_account_id, body.daily_limit));
     }
     if (action === "launch") return json(await launch(body as unknown as LaunchInput, callerCtx));
     if (action === "set-campaign-status") {

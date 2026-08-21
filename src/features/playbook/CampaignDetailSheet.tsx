@@ -167,7 +167,7 @@ export function CampaignDetailSheet({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="camp-scope camp-shell w-[96vw] max-w-[96vw] sm:max-w-6xl h-[92vh] flex flex-col gap-0 overflow-hidden p-0">
+      <DialogContent className="camp-scope camp-shell w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:max-w-5xl h-[min(48rem,88vh)] flex flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b px-5 sm:px-6 py-4 gap-3 pr-12 text-left">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -183,15 +183,17 @@ export function CampaignDetailSheet({
                 {c.anchor_date ? `${(c.owner?.full_name || hint || inboxLabel) ? " · " : ""}anchored ${formatDate(c.anchor_date)}` : ""}
               </p>
             </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CampaignStatusControls c={c} setStatus={setStatus} />
             {url && (
               <a href={url} target="_blank" rel="noopener noreferrer"
-                className="text-xs text-primary hover:underline inline-flex items-center gap-1 shrink-0">
-                Smartlead <ExternalLink className="h-3 w-3" />
+                className="camp-btn h-8 text-xs mr-1">
+                Open in Smartlead <ExternalLink className="h-3 w-3" />
               </a>
             )}
           </div>
-
-          <CampaignStatusControls c={c} setStatus={setStatus} />
 
           {delivery && (
             <div className="rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--camp-line)", background: "var(--camp-surface-2)" }}>

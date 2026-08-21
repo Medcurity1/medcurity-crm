@@ -11,13 +11,16 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { QueryError } from "@/components/QueryError";
-import { useEffect, useState } from "react";
-import { PencilLine, Signature } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ImagePlus, PencilLine, Signature } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import DOMPurify from "dompurify";
-import { useInboxHealth, useUpdateEmailAccountSignature, type InboxHealthEntry } from "./api";
+import {
+  useInboxHealth, useUpdateEmailAccountDailyLimit, useUpdateEmailAccountSignature, type InboxHealthEntry,
+} from "./api";
 
 function signaturePreviewHtml(signature: string): string {
   const clean = DOMPurify.sanitize(signature, { USE_PROFILES: { html: true } });
@@ -29,10 +32,19 @@ function signaturePreviewHtml(signature: string): string {
  *  endpoint didn't return anything usable (unverified endpoint shape — see
  *  the edge function's fetchInboxWarmup doc comment) — an unknown inbox
  *  should never look reassuring. */
-function warmupBadge(w: InboxHealthEntry["warmup"]): { label: string; className: string } {
-  if (!w || (w.spam_rate == null && w.status == null && w.sent_7d == null)) {
-    return { label: "No warmup data", className: "bg-muted text-muted-foreground" };
+function warmupBadge(ib: InboxHealthEntry): { label: string; className: string } {
+  const status = ib.account_status?.toLowerCase() ?? "";
+  if (/disconnect|error|fail/.test(status)) {
+    return { label: "Disconnected", className: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" };
   }
+  if (ib.warmup_enabled === false) {
+    return { label: "Warmup off", className: "bg-muted text-muted-foreground" };
+  }
+  if (ib.warmup_enabled !== true) {
+    return { label: "Warmup unknown", className: "bg-muted text-muted-foreground" };
+  }
+  const w = ib.warmup;
+  if (!w) return { label: "Warming", className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" };
   if (w.spam_rate != null && w.spam_rate >= 5) {
     return {
       label: `Spam risk: ${w.spam_rate}% landing in spam`,
@@ -42,7 +54,29 @@ function warmupBadge(w: InboxHealthEntry["warmup"]): { label: string; className:
   if (w.status && /paus|error|fail/i.test(w.status)) {
     return { label: "Warmup paused", className: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300" };
   }
-  return { label: "Warming well", className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" };
+  return { label: "Warming", className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" };
+}
+
+function VisualSignatureEditor({ seedHtml, label, onChange }: { seedHtml: string; label: string; onChange: (html: string) => void }) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (editorRef.current) editorRef.current.innerHTML = DOMPurify.sanitize(seedHtml, { USE_PROFILES: { html: true } });
+    // Seed once per mount. Parent state updates must never rewrite the DOM:
+    // doing so resets the browser selection and caused the caret-jump bug.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div
+      ref={editorRef}
+      contentEditable
+      suppressContentEditableWarning
+      role="textbox"
+      aria-multiline="true"
+      aria-label={`Visual signature editor for ${label}`}
+      className="min-h-32 rounded-md border bg-white p-3 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-ring"
+      onInput={(event) => onChange(event.currentTarget.innerHTML)}
+    />
+  );
 }
 
 export function InboxHealthDialog({
@@ -53,9 +87,14 @@ export function InboxHealthDialog({
 }) {
   const { data: inboxes, isLoading, isError, isFetching, refetch } = useInboxHealth(open);
   const updateSignature = useUpdateEmailAccountSignature();
+  const updateDailyLimit = useUpdateEmailAccountDailyLimit();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [signatureDraft, setSignatureDraft] = useState("");
   const [editorMode, setEditorMode] = useState<"visual" | "html">("visual");
+  const [editorRevision, setEditorRevision] = useState(0);
+  const [imageUrl, setImageUrl] = useState("");
+  const [editingLimitId, setEditingLimitId] = useState<number | null>(null);
+  const [dailyLimitDraft, setDailyLimitDraft] = useState(25);
 
   useEffect(() => {
     if (!open) { setEditingId(null); setSignatureDraft(""); }
@@ -86,7 +125,7 @@ export function InboxHealthDialog({
         ) : (
           <div className="space-y-2">
             {inboxes.map((ib) => {
-              const badge = warmupBadge(ib.warmup);
+              const badge = warmupBadge(ib);
               const label = ib.from_email ?? ib.from_name ?? `Inbox ${ib.id}`;
               const headroom = ib.daily_limit != null ? Math.max(0, ib.daily_limit - ib.total_leads_per_day) : null;
               return (
@@ -95,13 +134,33 @@ export function InboxHealthDialog({
                     <span className="text-sm font-medium truncate min-w-0">{label}</span>
                     <Badge variant="secondary" className={badge.className}>{badge.label}</Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {ib.daily_limit != null ? `${ib.daily_limit}/day limit` : "Daily limit unknown"}
+                  <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
+                    <span>{ib.daily_limit != null ? `${ib.daily_limit}/day mailbox safety limit` : "Mailbox safety limit unknown"}</span>
+                    {editingLimitId !== ib.id && (
+                      <button type="button" className="text-primary hover:underline" onClick={() => { setEditingLimitId(ib.id); setDailyLimitDraft(ib.daily_limit ?? 25); }}>Edit limit</button>
+                    )}
                     {ib.warmup?.sent_7d != null ? ` · ${ib.warmup.sent_7d} sent last 7 days` : ""}
                     {headroom != null
                       ? ` · room for ~${headroom} more/day`
                       : ib.total_leads_per_day > 0 ? " · remaining room unknown" : ""}
-                  </p>
+                  </div>
+                  {editingLimitId === ib.id && (
+                    <div className="rounded-xl border p-3 space-y-2" style={{ borderColor: "var(--camp-line)", background: "var(--camp-surface-2)" }}>
+                      <p className="text-xs font-medium">Mailbox daily safety limit</p>
+                      <p className="text-[11px] text-muted-foreground">The maximum this inbox may send in a day across all campaigns. Keep it conservative for deliverability; campaign volume is set separately in each campaign.</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Input className="w-28" type="number" min={1} max={500} value={dailyLimitDraft} onChange={(event) => setDailyLimitDraft(Math.max(1, Math.min(500, Number(event.target.value) || 1)))} />
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setEditingLimitId(null)}>Cancel</Button>
+                        <Button type="button" size="sm" disabled={updateDailyLimit.isPending || dailyLimitDraft === ib.daily_limit} onClick={() => updateDailyLimit.mutate(
+                          { emailAccountId: ib.id, dailyLimit: dailyLimitDraft },
+                          {
+                            onSuccess: () => { toast.success(`Daily limit updated for ${label}.`); setEditingLimitId(null); },
+                            onError: (error) => toast.error(`Daily limit wasn't updated: ${(error as Error).message}`),
+                          },
+                        )}>{updateDailyLimit.isPending ? "Saving…" : "Save to Smartlead"}</Button>
+                      </div>
+                    </div>
+                  )}
                   <p className="text-xs text-muted-foreground truncate">
                     {ib.campaigns.length > 0
                       ? `Feeding ${ib.campaigns.length === 1 ? ib.campaigns[0].name : `${ib.campaigns.length} campaigns`} · ${ib.total_leads_per_day} new/day`
@@ -121,7 +180,7 @@ export function InboxHealthDialog({
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => { setEditingId(ib.id); setSignatureDraft(ib.signature ?? ""); setEditorMode("visual"); }}
+                          onClick={() => { setEditingId(ib.id); setSignatureDraft(ib.signature ?? ""); setEditorMode("visual"); setEditorRevision(0); setImageUrl(""); }}
                         >
                           <PencilLine className="h-3.5 w-3.5 mr-1" /> Edit
                         </Button>
@@ -134,17 +193,7 @@ export function InboxHealthDialog({
                           <Button type="button" size="sm" variant={editorMode === "html" ? "secondary" : "ghost"} onClick={() => setEditorMode("html")}>HTML</Button>
                         </div>
                         {editorMode === "visual" ? (
-                          <div
-                            key={`${ib.id}-visual-${editorMode}`}
-                            contentEditable
-                            suppressContentEditableWarning
-                            role="textbox"
-                            aria-multiline="true"
-                            aria-label={`Visual signature editor for ${label}`}
-                            className="min-h-32 rounded-md border bg-white p-3 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-ring"
-                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(signatureDraft, { USE_PROFILES: { html: true } }) }}
-                            onInput={(event) => setSignatureDraft(event.currentTarget.innerHTML)}
-                          />
+                          <VisualSignatureEditor key={`${ib.id}-${editorMode}-${editorRevision}`} seedHtml={signatureDraft} label={label} onChange={setSignatureDraft} />
                         ) : (
                           <Textarea
                             value={signatureDraft}
@@ -154,6 +203,19 @@ export function InboxHealthDialog({
                             placeholder="Add a plain-text or HTML signature…"
                           />
                         )}
+                        <div className="rounded-xl border p-3 space-y-2" style={{ borderColor: "var(--camp-line)" }}>
+                          <div className="flex items-center gap-2"><ImagePlus className="h-4 w-4" /><p className="text-xs font-medium">Insert hosted image</p></div>
+                          <p className="text-[11px] text-muted-foreground">Smartlead signatures accept HTML image URLs, but its API does not provide a signature-image upload endpoint. Use an existing public HTTPS image URL; Pulse will not upload or take ownership of the file.</p>
+                          <div className="flex gap-2 flex-col sm:flex-row">
+                            <Input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://…/logo.png" aria-label={`Hosted signature image URL for ${label}`} />
+                            <Button type="button" variant="outline" size="sm" disabled={!/^https:\/\/\S+$/i.test(imageUrl)} onClick={() => {
+                              const safeUrl = imageUrl.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                              setSignatureDraft((current) => `${current}<p><img src="${safeUrl}" alt="" style="max-width:100%;height:auto;"></p>`);
+                              setImageUrl("");
+                              setEditorRevision((value) => value + 1);
+                            }}>Insert image</Button>
+                          </div>
+                        </div>
                         <p className="text-[11px] text-muted-foreground">Edit what recipients will see, or switch to HTML for precise formatting. Saving changes this Smartlead inbox across its campaigns.</p>
                         <div className="flex justify-end gap-2">
                           <Button type="button" variant="ghost" size="sm" onClick={() => setEditingId(null)}>Cancel</Button>

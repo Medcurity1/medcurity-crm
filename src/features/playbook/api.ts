@@ -544,6 +544,8 @@ export interface InboxHealthEntry {
   total_leads_per_day: number;
   /** Exact Smartlead account signature; null means the account detail read did not expose one. */
   signature: string | null;
+  warmup_enabled: boolean | null;
+  account_status: string | null;
 }
 
 /** Lazy — only fires while `enabled` (the Sending Inboxes dialog is open, or
@@ -580,6 +582,21 @@ export function useUpdateEmailAccountSignature() {
       qc.invalidateQueries({ queryKey: ["playbook", "inbox-health"] });
       qc.invalidateQueries({ queryKey: ["playbook", "email-accounts"] });
     },
+  });
+}
+
+export function useUpdateEmailAccountDailyLimit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ emailAccountId, dailyLimit }: { emailAccountId: number; dailyLimit: number }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "update-email-account-daily-limit", email_account_id: emailAccountId, daily_limit: dailyLimit },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { success: true; daily_limit: number };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["playbook", "inbox-health"] }),
   });
 }
 

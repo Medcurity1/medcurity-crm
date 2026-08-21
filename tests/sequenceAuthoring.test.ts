@@ -88,9 +88,9 @@ describe("CampaignWizard per-launch authoring", () => {
     expect(wizard).not.toMatch(/still needs wording before you can continue/);
   });
 
-  it("resets method-specific defaults and does not attribute custom steps to a seeded template", () => {
+  it("keeps start-on-launch as the new-campaign default and does not attribute custom steps to a seeded template", () => {
     const wizard = visibleSource("src/features/playbook/CampaignWizard.tsx");
-    expect(wizard).toMatch(/setAutoStart\(false\);\s*setEditingSequence\(false\);/);
+    expect(wizard).not.toMatch(/setAutoStart\(false\);\s*setEditingSequence\(false\);/);
     expect(wizard).toMatch(/setAutoStart\(true\);\s*setEditingSequence\(false\);\s*setTemplateSteps\(templateSeed\?\.steps/);
     expect(wizard).toMatch(/template_id: customSequence \? undefined : \(templateSeed\?\.template_id \?\? undefined\)/);
     expect(wizard).toMatch(/flow === "template" && customSequence/);
