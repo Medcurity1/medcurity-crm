@@ -8,6 +8,15 @@ const edge = readFileSync(
 );
 
 describe("Campaigns company rollout backend boundary", () => {
+  it("attributes add-recipient audits and never records enrollment as a sent email", () => {
+    expect(edge).toContain('"launch", "add-recipients", "set-campaign-status"');
+    const addSlice = edge.slice(
+      edge.indexOf("async function addRecipientsToExistingCampaign"),
+      edge.indexOf("async function importCampaigns"),
+    );
+    expect(addSlice).not.toContain('email_direction: "sent"');
+  });
+
   it("allows the read actions the shared builder needs while retaining an explicit allowlist", () => {
     const allowlist = edge.slice(
       edge.indexOf("const REP_ELIGIBLE_ACTIONS"),

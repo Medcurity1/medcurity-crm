@@ -1081,21 +1081,9 @@ async function addRecipientsToExistingCampaign(p: AddRecipientsInput, callerCtx:
       tasks_created = (await spawnCampaignTasks(campaign.id)).tasksCreated;
     }
 
-    const activities = uploaded.filter((r) => r.contact_id).map((r) => ({
-      activity_type: "email",
-      subject: `Campaign: ${campaign.name}`,
-      body: `Added to Smartlead campaign "${campaign.name}".`,
-      email_direction: "sent",
-      email_to: [r.email],
-      contact_id: r.contact_id,
-      account_id: r.account_id ?? null,
-      owner_user_id: campaign.owner_user_id,
-      activity_date: new Date().toISOString(),
-    }));
-    if (activities.length) {
-      const { error: activityErr } = await svc.from("activities").insert(activities);
-      if (activityErr) console.error("add-recipients: activity logging failed:", activityErr.message);
-    }
+    // Enrollment is not delivery. Do not manufacture a sent-email CRM
+    // activity here, especially for draft campaigns; authoritative webhook
+    // events create delivery history only after Smartlead actually sends.
     try {
       await auditCampaignAction("campaign_recipients_added", campaign.id, callerCtx.auditUserId, {
         requested: p.recipients.length, enrolled: insertedIds.length, smartlead_failed: failed_emails.length,
@@ -3996,7 +3984,7 @@ Deno.serve(async (req) => {
     // audit rows, and only for human callers — the sweep's service-role
     // calls record changed_by = null. Kept separate from userId, which must
     // stay null for admins (a non-null userId flips on rep ownership checks).
-    const AUDITED_ACTIONS = new Set(["launch", "set-campaign-status", "delete-campaign", "optout-add"]);
+    const AUDITED_ACTIONS = new Set(["launch", "add-recipients", "set-campaign-status", "delete-campaign", "optout-add"]);
     const auditUserId = !svcCaller && AUDITED_ACTIONS.has(action) ? await callerUserId(auth) : null;
     const callerCtx: CallerContext = { isAdmin: adminCaller, userId: repUserId, auditUserId };
 
