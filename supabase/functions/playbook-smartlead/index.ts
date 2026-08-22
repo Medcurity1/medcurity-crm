@@ -1990,6 +1990,22 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
   }
   const delay = () => new Promise((r) => setTimeout(r, 300));
 
+  // Validate template_id if supplied — reject launch with unpublished or
+  // missing templates BEFORE any Smartlead mutation. Template-less launches
+  // (write-your-own, AI-generated) skip this entirely.
+  if (p.template_id) {
+    const { data: tmpl } = await svc
+      .from("campaign_templates")
+      .select("id, publish_state")
+      .eq("id", p.template_id)
+      .maybeSingle();
+    if (!tmpl || tmpl.publish_state !== "published") {
+      throw new Error(
+        "This template is no longer available for launch. It may have been unpublished or removed — pick a different template and try again.",
+      );
+    }
+  }
+
   // Mixed-channel launch (template gallery / SequenceEditor "Launch this
   // sequence"): p.steps is the frozen source of truth — subject/body edits
   // made in the wizard are already folded into it client-side. Derive

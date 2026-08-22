@@ -23,6 +23,8 @@ export interface SequenceStep {
   stop_on_unsubscribe?: boolean;
 }
 
+export type TemplatePublishState = "draft" | "published" | "archived";
+
 export interface CampaignTemplate {
   id: string;
   name: string;
@@ -30,6 +32,7 @@ export interface CampaignTemplate {
   category: "flagship" | "warming" | "post_demo" | "re_engagement" | "event" | "custom";
   is_preset: boolean;
   owner_user_id: string | null;
+  publish_state: TemplatePublishState;
   duration_days: number | null;
   step_count: number | null;
   steps: SequenceStep[];

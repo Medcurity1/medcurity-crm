@@ -436,6 +436,7 @@ async function campaignInsights(campaignId: string) {
       .from("campaign_templates")
       .select("id, name, steps")
       .eq("id", campaign.template_id)
+      .eq("publish_state", "published")
       .maybeSingle();
     template = tmpl ?? null;
     const { data: sibs } = await svc

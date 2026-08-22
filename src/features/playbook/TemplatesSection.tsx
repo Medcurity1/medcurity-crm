@@ -182,69 +182,82 @@ export function TemplatesSection({
         </button>
       </div>}
 
-      {/* Template preview dialog — the visual timeline */}
+      {/* Template preview dialog — bounded workspace with fixed header/footer
+          and internal-only vertical scroll so the sequence body never pushes
+          action buttons off-screen (fixes 8-Touch at 390×844). */}
       <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
-        <DialogContent className="camp-scope camp-shell sm:max-w-lg max-h-[85vh] overflow-y-auto p-6">
+        <DialogContent className="camp-scope camp-shell sm:max-w-3xl lg:max-w-4xl w-[calc(100vw-2rem)] max-h-[85vh] flex flex-col p-0 overflow-x-hidden">
           {preview && (
             <>
-              <DialogHeader>
-                <DialogTitle>{preview.name}</DialogTitle>
-                <DialogDescription>{preview.description}</DialogDescription>
-              </DialogHeader>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground -mt-1 mb-1">
-                <span className="inline-flex items-center gap-1"><Layers className="h-3.5 w-3.5" />{preview.step_count ?? preview.steps.length} touches</span>
-                {preview.duration_days != null && (
-                  <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{preview.duration_days} days</span>
+              {/* ── Sticky header ── */}
+              <div className="sticky top-0 z-10 p-6 pb-3 border-b bg-inherit rounded-t-2xl">
+                <DialogHeader>
+                  <DialogTitle className="break-words [overflow-wrap:anywhere]">{preview.name}</DialogTitle>
+                  <DialogDescription className="break-words [overflow-wrap:anywhere]">{preview.description}</DialogDescription>
+                </DialogHeader>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground mt-2">
+                  <span className="inline-flex items-center gap-1"><Layers className="h-3.5 w-3.5" />{preview.step_count ?? preview.steps.length} touches</span>
+                  {preview.duration_days != null && (
+                    <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{preview.duration_days} days</span>
+                  )}
+                </div>
+                {preview.domain_rules?.start_anchor === "nearest_monday" && (
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Days assume a Monday start.
+                  </p>
                 )}
               </div>
-              {preview.domain_rules?.start_anchor === "nearest_monday" && (
-                <p className="text-[11px] text-muted-foreground -mt-0.5 mb-1">
-                  Days assume a Monday start.
-                </p>
-              )}
-              <SequenceTimeline steps={preview.steps} />
-              <DialogFooter className="flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
-                <div className="flex items-center gap-1 order-2 sm:order-1">
-                  {canManage && !preview.is_preset && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-muted-foreground hover:text-destructive"
-                      onClick={() => setDeleteTarget(preview)}
-                    >
-                      <Trash2 className="h-4 w-4 mr-1" /> Delete
-                    </Button>
-                  )}
-                </div>
-                <div className="flex flex-col items-end gap-1 order-1 sm:order-2">
-                  <div className="flex items-center gap-2">
-                    {canManage && (preview.is_preset ? (
-                      <button type="button" className="camp-btn text-xs" onClick={() => openCustomize(preview)}>
-                        <Copy className="h-4 w-4" /> Customize a copy
-                      </button>
-                    ) : (
-                      <button type="button" className="camp-btn text-xs" onClick={() => openEdit(preview)}>
-                        <Pencil className="h-4 w-4" /> Edit
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      className="camp-btn-primary"
-                      disabled={smartleadDisabled}
-                      onClick={() => {
-                        openLaunch({ template_id: preview.id, name: preview.name, steps: preview.steps });
-                        setPreview(null);
-                      }}
-                    >
-                      Use this template
-                      <ArrowRight className="h-4 w-4" />
-                    </button>
+
+              {/* ── Scrollable sequence body ── */}
+              <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-3 min-h-0 [overflow-wrap:anywhere]">
+                <SequenceTimeline steps={preview.steps} fullCopy />
+              </div>
+
+              {/* ── Sticky footer ── */}
+              <div className="sticky bottom-0 z-10 p-6 pt-3 border-t bg-inherit rounded-b-2xl">
+                <DialogFooter className="flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-1 order-2 sm:order-1">
+                    {canManage && !preview.is_preset && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setDeleteTarget(preview)}
+                      >
+                        <Trash2 className="h-4 w-4 mr-1" /> Delete
+                      </Button>
+                    )}
                   </div>
-                  {smartleadDisabled && (
-                    <p className="text-xs text-muted-foreground">Connect Smartlead to launch campaigns.</p>
-                  )}
-                </div>
-              </DialogFooter>
+                  <div className="flex flex-col items-stretch sm:items-end gap-1 order-1 sm:order-2">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      {canManage && (preview.is_preset ? (
+                        <button type="button" className="camp-btn text-xs" onClick={() => openCustomize(preview)}>
+                          <Copy className="h-4 w-4" /> Customize a copy
+                        </button>
+                      ) : (
+                        <button type="button" className="camp-btn text-xs" onClick={() => openEdit(preview)}>
+                          <Pencil className="h-4 w-4" /> Edit
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        className="camp-btn-primary"
+                        disabled={smartleadDisabled}
+                        onClick={() => {
+                          openLaunch({ template_id: preview.id, name: preview.name, steps: preview.steps });
+                          setPreview(null);
+                        }}
+                      >
+                        Use this template
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                    {smartleadDisabled && (
+                      <p className="text-xs text-muted-foreground">Connect Smartlead to launch campaigns.</p>
+                    )}
+                  </div>
+                </DialogFooter>
+              </div>
             </>
           )}
         </DialogContent>

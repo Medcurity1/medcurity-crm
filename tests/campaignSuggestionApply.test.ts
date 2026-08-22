@@ -25,6 +25,7 @@ const TEMPLATE: CampaignTemplate = {
   category: "custom",
   is_preset: false,
   owner_user_id: null,
+  publish_state: "published",
   duration_days: 8,
   step_count: 3,
   steps: STEPS,

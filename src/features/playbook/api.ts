@@ -174,16 +174,23 @@ export function useIdeaFeedback() {
 // Campaigns (read) — populated by the Smartlead sync in Phase C
 // ---------------------------------------------------------------------------
 
-/** Sequence templates (presets + any custom), newest preset categories first. */
-export function useCampaignTemplates() {
+/** Sequence templates (presets + any custom), newest preset categories first.
+ *  `publishedOnly` (default true) filters to published templates — the right
+ *  default for every picker / gallery surface. Pass false only for admin
+ *  management views that need to see drafts/archived. RLS already hides
+ *  unpublished presets from non-admins; this filter ensures admin pickers
+ *  also see only launchable templates. */
+export function useCampaignTemplates({ publishedOnly = true }: { publishedOnly?: boolean } = {}) {
   return useQuery({
-    queryKey: ["playbook", "campaign-templates"],
+    queryKey: ["playbook", "campaign-templates", { publishedOnly }],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let q = supabase
         .from("campaign_templates")
         .select("*")
         .order("is_preset", { ascending: false })
         .order("created_at", { ascending: true });
+      if (publishedOnly) q = q.eq("publish_state", "published");
+      const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as CampaignTemplate[];
     },
@@ -214,6 +221,9 @@ export function useSaveTemplate() {
         step_count: steps.length,
         duration_days: steps.reduce((m, s) => Math.max(m, s.day_offset || 0), 0),
         updated_at: new Date().toISOString(),
+        // User-saved custom templates are intentional publishes — stamp
+        // published so they appear in pickers and pass launch validation.
+        publish_state: "published",
       };
       if (t.domain_rules) payload.domain_rules = t.domain_rules;
       if (t.id) {
@@ -235,6 +245,12 @@ export function useSaveTemplate() {
       // who made it.
       const { data: auth } = await supabase.auth.getUser();
       payload.owner_user_id = auth.user?.id ?? null;
+      // Custom template saves are intentional publish actions — stamp
+      // published so the template appears in pickers immediately. The DB
+      // DEFAULT is 'draft' (safe for unfinished presets), so without this
+      // a just-saved custom template would vanish from every published-only
+      // query.
+      payload.publish_state = "published";
       const { data, error } = await supabase
         .from("campaign_templates")
         .insert(payload)

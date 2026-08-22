@@ -59,6 +59,32 @@ export function readableTaskPreview(t?: string, context: SequencePreviewContext 
     .trim();
 }
 
+/** Convert stored HTML body (the rich-text editor's output) to readable plain
+ *  text with paragraph breaks preserved. Does NOT use dangerouslySetInnerHTML
+ *  — just tag-to-whitespace conversion + entity decoding. Safe for rendering
+ *  in a `whitespace-pre-wrap` `<p>` tag. */
+export function htmlToReadableText(html?: string | null): string {
+  return (html ?? "")
+    // Block-level breaks: </p>, <br>, </div>, </li> → newlines
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:div|li|blockquote|h[1-6])>/gi, "\n")
+    // Strip all remaining tags
+    .replace(/<[^>]+>/g, "")
+    // Decode common HTML entities the rich-text editor produces
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;|&apos;/gi, "'")
+    // Clean up: collapse runs of spaces/tabs within lines but keep newlines
+    .replace(/[ \t]+/g, " ")
+    // Collapse 3+ consecutive newlines to double (paragraph break)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function subtitle(s: SequenceStep, context: SequencePreviewContext): string {
   const note = readableTaskPreview(s.task_note_template, context);
   if (note) return note;
@@ -68,15 +94,22 @@ function subtitle(s: SequenceStep, context: SequencePreviewContext): string {
   return CHANNEL[s.channel].label;
 }
 
+/** @param fullCopy  When true the timeline shows complete subject/body text
+ *  without truncation and every step renders expanded — designed for the
+ *  template preview modal where users need to read the full sequence copy.
+ *  Compact cards and other callers leave this false (default). */
 export function SequenceTimeline({
   steps,
   previewContext = {},
   defaultExpanded = false,
+  fullCopy = false,
   onEdit,
 }: {
   steps: SequenceStep[];
   previewContext?: SequencePreviewContext;
   defaultExpanded?: boolean;
+  /** Show full untruncated copy for every step (preview modal). */
+  fullCopy?: boolean;
   onEdit?: (step: SequenceStep) => void;
 }) {
   const ordered = [...steps].sort((a, b) => a.order - b.order);
@@ -85,13 +118,15 @@ export function SequenceTimeline({
     Number.POSITIVE_INFINITY,
   );
   const [openOrder, setOpenOrder] = useState<number | null>(defaultExpanded ? (ordered[0]?.order ?? null) : null);
+  // In fullCopy mode every step is always expanded and not togglable.
+  const isOpen = (order: number) => fullCopy || openOrder === order;
   return (
     <div className="relative">
       {ordered.map((s, i) => {
         const cfg = CHANNEL[s.channel] ?? CHANNEL.EMAIL_AUTO;
         const Icon = cfg.icon;
         const who = whoBadge(s);
-        const open = openOrder === s.order;
+        const open = isOpen(s.order);
         // Automated emails send inside the campaign's Smartlead window, not
         // at a per-step hour — printing the step's stored clock times there
         // would advertise a control that doesn't exist (Nathan 8/19). Task
@@ -105,6 +140,15 @@ export function SequenceTimeline({
           isFirstEmail: s.channel === "EMAIL_AUTO" && s.order === firstEmailOrder,
         });
         const preview = firstMeaningfulLine(readableTaskPreview(s.body_template || s.task_note_template, previewContext) || s.body_template || s.task_note_template);
+        // fullCopy: substitute variables, then convert HTML → readable plain
+        // text preserving paragraph/br breaks. readableTaskPreview handles
+        // variable substitution (its whitespace collapse is harmless here
+        // because htmlToReadableText re-derives structure from the surviving
+        // HTML tags). Falls back to the raw template if substitution empties.
+        const fullBodyText = fullCopy
+          ? htmlToReadableText(readableTaskPreview(s.body_template || s.task_note_template, previewContext) || s.body_template || s.task_note_template || "")
+          : "";
+        const wrapClass = fullCopy ? "break-words [overflow-wrap:anywhere]" : "truncate";
         return (
           <div key={s.order} className="flex gap-3 pb-2 last:pb-0 relative">
             {i < ordered.length - 1 && (
@@ -114,17 +158,20 @@ export function SequenceTimeline({
               <Icon className="h-3.5 w-3.5" />
             </div>
             <div className="flex-1 min-w-0 rounded-xl bg-card/80 px-3 py-2.5 shadow-sm">
-              <div className="flex items-center gap-2">
+              <div className={cn("flex items-center gap-2", fullCopy && "flex-wrap")}>
                 <button
                   type="button"
                   aria-expanded={open}
-                  onClick={() => setOpenOrder(open ? null : s.order)}
-                  className="min-w-0 flex-1 text-left hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+                  onClick={() => !fullCopy && setOpenOrder(open ? null : s.order)}
+                  className={cn(
+                    "min-w-0 flex-1 text-left hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md",
+                    fullCopy && "cursor-default hover:opacity-100",
+                  )}
                 >
-                  <p className="font-medium text-sm truncate">{headline}</p>
+                  <p className={cn("font-medium text-sm", wrapClass)}>{headline}</p>
                   <p className="text-xs text-muted-foreground">{when} · {cfg.label}</p>
                   {preview && !open && (
-                    <p className="text-xs text-muted-foreground mt-0.5 truncate">{preview}</p>
+                    <p className={cn("text-xs text-muted-foreground mt-0.5", wrapClass)}>{preview}</p>
                   )}
                 </button>
                 <Badge variant="outline" className={cn("hidden sm:inline-flex text-xs font-medium shrink-0", who.cls)}>{who.text}</Badge>
@@ -137,19 +184,27 @@ export function SequenceTimeline({
                     Edit
                   </button>
                 )}
-                <button
-                  type="button"
-                  aria-label={open ? "Collapse step" : "Expand step"}
-                  onClick={() => setOpenOrder(open ? null : s.order)}
-                  className="shrink-0 rounded-md p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
-                </button>
+                {!fullCopy && (
+                  <button
+                    type="button"
+                    aria-label={open ? "Collapse step" : "Expand step"}
+                    onClick={() => setOpenOrder(open ? null : s.order)}
+                    className="shrink-0 rounded-md p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
+                  </button>
+                )}
               </div>
               {open && (
                 <div className="mt-2 space-y-1">
                   <Badge variant="outline" className={cn("sm:hidden text-xs font-medium", who.cls)}>{who.text}</Badge>
-                  <p className="text-xs text-muted-foreground">{subtitle(s, previewContext) || preview || "No copy yet."}</p>
+                  {fullCopy ? (
+                    <p className="text-xs text-muted-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                      {fullBodyText || subtitle(s, previewContext) || "No copy yet."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">{subtitle(s, previewContext) || preview || "No copy yet."}</p>
+                  )}
                 </div>
               )}
             </div>
