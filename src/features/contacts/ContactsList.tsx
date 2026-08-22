@@ -4,7 +4,7 @@ import { useUrlNumberState, useUrlArrayState, useUrlState, useUrlSortState } fro
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Users, Plus, Search, UploadCloud, ListChecks, Megaphone, Tag } from "lucide-react";
-import { useContacts, useArchiveContact, useBulkUpdateOwner, useBulkDeleteContacts, fetchContactsForExport, fetchContactTagNames } from "./api";
+import { useContacts, useArchiveContact, useBulkUpdateOwner, useBulkDeleteContacts, fetchContactsForExport, fetchContactTagNames, fetchCampaignContactsByIds } from "./api";
 import { useBulkUndo, capturePriorOwners } from "@/features/archive/bulk-undo";
 import { ExportCsvButton } from "@/features/list-export/ExportCsvButton";
 import {
@@ -59,7 +59,8 @@ import { useTags, useApplyTag, useContactTagsMap } from "@/features/tags/api";
 import { TagChips } from "@/features/tags/TagChips";
 import { TagPicker } from "@/features/tags/TagPicker";
 import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
-import { QuickCampaignDialog } from "@/features/playbook/QuickCampaignDialog";
+import { QuickCampaignDialog, type QuickCampaignContact } from "@/features/playbook/QuickCampaignDialog";
+import { AddToCampaignDialog } from "@/features/playbook/AddToCampaignDialog";
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -125,10 +126,12 @@ export function ContactsList() {
   // selection when the clicked row is part of it (Nathan 2026-07-20).
   const [ctxListIds, setCtxListIds] = useState<string[]>([]);
   const [ctxListOpen, setCtxListOpen] = useState(false);
-  // Right-click "Start a campaign…" (Campaigns overhaul S7, admin-only) —
+  // Right-click "Start a campaign…" (Campaigns overhaul S7) —
   // same clicked-vs-selection targeting as "Add to list" above.
-  const [ctxCampaignIds, setCtxCampaignIds] = useState<string[]>([]);
   const [ctxCampaignOpen, setCtxCampaignOpen] = useState(false);
+  const [addCampaignOpen, setAddCampaignOpen] = useState(false);
+  const [campaignContacts, setCampaignContacts] = useState<QuickCampaignContact[]>([]);
+  const [campaignContactsLoading, setCampaignContactsLoading] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [addToListOpen, setAddToListOpen] = useState(false);
   // Bulk delete is confirmed via the app ConfirmDialog (not window.confirm)
@@ -138,6 +141,32 @@ export function ContactsList() {
   // into a contact, then hit Back and find the list still sorted — plain
   // useState reset on every remount.
   const [sort, setSortState] = useUrlSortState("sort");
+
+  async function openCampaignForIds(ids: string[]) {
+    setCampaignContactsLoading(true);
+    try {
+      const resolved = await fetchCampaignContactsByIds(ids);
+      setCampaignContacts(resolved);
+      setCtxCampaignOpen(true);
+    } catch (error) {
+      toast.error("Couldn't gather those contacts: " + (error as Error).message);
+    } finally {
+      setCampaignContactsLoading(false);
+    }
+  }
+
+  async function addCampaignForIds(ids: string[]) {
+    setCampaignContactsLoading(true);
+    try {
+      const resolved = await fetchCampaignContactsByIds(ids);
+      setCampaignContacts(resolved);
+      setAddCampaignOpen(true);
+    } catch (error) {
+      toast.error("Couldn't gather those contacts: " + (error as Error).message);
+    } finally {
+      setCampaignContactsLoading(false);
+    }
+  }
   const cols = useColumnPrefs("contacts", CONTACTS_COLUMNS);
 
   // The filter set, hoisted out of the useContacts() call so "Export CSV"
@@ -606,23 +635,34 @@ export function ContactsList() {
                           ? `Add ${selectedIds.size} selected to list…`
                           : "Add to list…"}
                       </ContextMenuItem>
-                      {isAdmin && (
-                        <ContextMenuItem
+                      <ContextMenuItem
+                        onSelect={() => {
+                          const ids =
+                            selectedIds.has(contact.id) && selectedIds.size > 1
+                              ? Array.from(selectedIds)
+                              : [contact.id];
+                          void addCampaignForIds(ids);
+                        }}
+                      >
+                        <Megaphone className="h-4 w-4" />
+                        {selectedIds.has(contact.id) && selectedIds.size > 1
+                          ? `Add ${selectedIds.size} selected to a campaign…`
+                          : "Add to a campaign…"}
+                      </ContextMenuItem>
+                      <ContextMenuItem
                           onSelect={() => {
                             const ids =
                               selectedIds.has(contact.id) && selectedIds.size > 1
                                 ? Array.from(selectedIds)
                                 : [contact.id];
-                            setCtxCampaignIds(ids);
-                            setCtxCampaignOpen(true);
+                            void openCampaignForIds(ids);
                           }}
                         >
                           <Megaphone className="h-4 w-4" />
                           {selectedIds.has(contact.id) && selectedIds.size > 1
                             ? `Start a campaign for ${selectedIds.size} selected…`
                             : "Start a campaign…"}
-                        </ContextMenuItem>
-                      )}
+                      </ContextMenuItem>
                     </ContextMenuContent>
                   </ContextMenu>
                 ))}
@@ -675,6 +715,15 @@ export function ContactsList() {
           <ListChecks className="h-4 w-4 mr-1" />
           Add to list…
         </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={campaignContactsLoading}
+          onClick={() => void openCampaignForIds(Array.from(selectedIds))}
+        >
+          <Megaphone className="h-4 w-4 mr-1" />
+          {campaignContactsLoading ? "Gathering…" : "Start a campaign…"}
+        </Button>
       </BulkActionBar>
 
       <AddToListDialog
@@ -690,13 +739,16 @@ export function ContactsList() {
         contactIds={ctxListIds}
       />
 
-      {isAdmin && (
-        <QuickCampaignDialog
+      <QuickCampaignDialog
           open={ctxCampaignOpen}
           onOpenChange={setCtxCampaignOpen}
-          contacts={(contacts ?? []).filter((c) => ctxCampaignIds.includes(c.id))}
-        />
-      )}
+          contacts={campaignContacts}
+      />
+      <AddToCampaignDialog
+        open={addCampaignOpen}
+        onOpenChange={setAddCampaignOpen}
+        contacts={campaignContacts}
+      />
 
       <ConfirmDialog
         open={confirmBulkDelete}

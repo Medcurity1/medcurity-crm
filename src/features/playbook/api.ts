@@ -677,6 +677,40 @@ export function useLaunchCampaign() {
   });
 }
 
+export type AddRecipientsResult = {
+  success: boolean;
+  requested: number;
+  enrolled: number;
+  suppression_dropped: number;
+  active_elsewhere_dropped: number;
+  already_in_campaign_dropped: number;
+  duplicates_dropped: number;
+  invalid_dropped: number;
+  concurrent_dropped: number;
+  smartlead_failed: number;
+  tasks_created: number;
+};
+
+export function useAddCampaignRecipients() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { campaign_id: string; recipients: Recipient[] }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "add-recipients", ...p },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as AddRecipientsResult;
+    },
+    onSuccess: (_result, input) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-enrollments", input.campaign_id] });
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-enrollment-stats"] });
+    },
+    onError: (error) => toast.error("Couldn't add people: " + (error as Error).message),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Campaign wizard draft autosave — survive an accidental close (Escape /
 // outside-click on the wizard Dialog used to discard everything). One row

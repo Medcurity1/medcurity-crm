@@ -36,9 +36,11 @@ type LaunchSeed = { template_id: string | null; name: string; steps: SequenceSte
 export function TemplatesSection({
   embedded = false,
   onUseTemplate,
+  canManage = true,
 }: {
   embedded?: boolean;
   onUseTemplate?: (seed: LaunchSeed) => void;
+  canManage?: boolean;
 } = {}) {
   const { data: templates, isLoading, isError, isFetching, refetch } = useCampaignTemplates();
   const { data: scoreboard } = useTemplateScoreboard();
@@ -174,11 +176,11 @@ export function TemplatesSection({
         </div>
       )}
 
-      <div className="flex justify-start pt-1">
+      {canManage && <div className="flex justify-start pt-1">
         <button type="button" className="camp-btn-primary text-xs" onClick={openBlank}>
           <Wand2 className="h-3.5 w-3.5" /> Build a new sequence
         </button>
-      </div>
+      </div>}
 
       {/* Template preview dialog — the visual timeline */}
       <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
@@ -203,7 +205,7 @@ export function TemplatesSection({
               <SequenceTimeline steps={preview.steps} />
               <DialogFooter className="flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
                 <div className="flex items-center gap-1 order-2 sm:order-1">
-                  {!preview.is_preset && (
+                  {canManage && !preview.is_preset && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -216,7 +218,7 @@ export function TemplatesSection({
                 </div>
                 <div className="flex flex-col items-end gap-1 order-1 sm:order-2">
                   <div className="flex items-center gap-2">
-                    {preview.is_preset ? (
+                    {canManage && (preview.is_preset ? (
                       <button type="button" className="camp-btn text-xs" onClick={() => openCustomize(preview)}>
                         <Copy className="h-4 w-4" /> Customize a copy
                       </button>
@@ -224,7 +226,7 @@ export function TemplatesSection({
                       <button type="button" className="camp-btn text-xs" onClick={() => openEdit(preview)}>
                         <Pencil className="h-4 w-4" /> Edit
                       </button>
-                    )}
+                    ))}
                     <button
                       type="button"
                       className="camp-btn-primary"
@@ -250,13 +252,13 @@ export function TemplatesSection({
 
       {/* The one builder — edit/create a sequence. key remounts it fresh
           per open so a reopen never shows the previously-built sequence. */}
-      <SequenceEditor
+      {canManage && <SequenceEditor
         key={editorNonce}
         open={editorOpen}
         onOpenChange={setEditorOpen}
         initial={editorSeed}
         onLaunch={(t) => openLaunch({ template_id: t.id, name: t.name, steps: t.steps })}
-      />
+      />}
 
       {/* Launch wizard, template mode (Campaigns overhaul S3) — opened from
           "Use this template" above or SequenceEditor's "Use this sequence"

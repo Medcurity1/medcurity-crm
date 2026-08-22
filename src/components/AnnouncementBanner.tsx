@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, Sparkles, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { launchBannerActive } from "@/features/collateral/collateral-logic";
 
 interface Announcement {
   /** Bump this whenever you want a brand-new banner everyone sees once. */
@@ -45,18 +44,16 @@ interface Announcement {
 // Unlike past banners this one RETIRES ITSELF ~30 days after the v1.2
 // release via launchBannerActive (spec: the announcement must not outstay
 // the launch); flip to another announcement or null any time before that.
-const COLLATERAL_LAUNCH: Announcement = {
-  id: "collateral-launch-2026-08",
-  title: "New: Collateral",
+const CAMPAIGNS_LAUNCH: Announcement = {
+  id: "campaigns-launch-2026-08",
+  title: "Campaigns is now open to everyone",
   message:
-    "Every current sales asset in one place. Search it, copy a link, paste it into your email.",
-  ctaLabel: "Open Collateral",
-  ctaRoute: "/collateral",
+    "Build your audience, choose the sender and schedule, review the sequence, and launch through Smartlead, all from Pulse.",
+  ctaLabel: "Open Campaigns",
+  ctaRoute: "/playbook",
 };
 
-export const ACTIVE_ANNOUNCEMENT: Announcement | null = launchBannerActive()
-  ? COLLATERAL_LAUNCH
-  : null;
+export const ACTIVE_ANNOUNCEMENT: Announcement | null = CAMPAIGNS_LAUNCH;
 
 function storageKey(id: string) {
   return `announcement-dismissed:${id}`;

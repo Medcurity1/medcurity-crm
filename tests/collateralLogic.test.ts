@@ -511,15 +511,13 @@ describe("launch banner retirement (change 8: deterministic ~30-day window)", ()
     expect(launchBannerActive(new Date(Date.UTC(2026, 11, 1)))).toBe(false);
   });
 
-  it("drives the app-wide AnnouncementBanner (Nathan 8/18: all-tabs launch pattern)", () => {
+  it("is superseded by the company-wide Campaigns announcement", () => {
     const banner = readFileSync(
       path.resolve(__dirname, "..", "src", "components", "AnnouncementBanner.tsx"),
       "utf8",
     );
-    expect(banner).toContain('id: "collateral-launch-2026-08"');
-    expect(banner).toContain('ctaRoute: "/collateral"');
-    // The self-retirement gate: the announcement disappears on its own.
-    expect(banner).toContain("launchBannerActive()");
+    expect(banner).toContain('id: "campaigns-launch-2026-08"');
+    expect(banner).toContain('ctaRoute: "/playbook"');
     // One announcement at a time: the Nexus banner era ended with this.
     expect(banner).not.toContain('id: "nexus-launch-2026-08"');
     // The old page-local banner is gone from the Collateral feature.
@@ -542,12 +540,12 @@ describe("v1.2 source guards (role gating, title source, scope)", () => {
     expect(sync).not.toContain("fields.Title");
   });
 
-  it("the /collateral route is open (no AdminGate), other gates untouched", () => {
+  it("the /collateral and company-wide /playbook routes are open", () => {
     const app = read("src", "App.tsx");
     expect(app).toContain('<Route path="collateral" element={<CollateralPage />} />');
-    // The tab-level open-up must not have weakened the other admin gates.
+    // Imports remains admin-only while Campaigns opens to every signed-in role.
     expect(app).toContain('<Route path="imports" element={<AdminGate><ImportsPen /></AdminGate>} />');
-    expect(app).toContain('<Route path="playbook" element={<AdminGate><PlaybookPage /></AdminGate>} />');
+    expect(app).toContain('<Route path="playbook" element={<PlaybookPage />} />');
   });
 
   it("sidebar: Collateral sits in navItems with the red New tag, no ADMIN badge", () => {

@@ -18,6 +18,7 @@ import { ArchiveDialog } from "@/components/ArchiveDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
 import { QuickCampaignDialog } from "@/features/playbook/QuickCampaignDialog";
+import { AddToCampaignDialog } from "@/features/playbook/AddToCampaignDialog";
 import { QueryError } from "@/components/QueryError";
 import { RecordId } from "@/components/RecordId";
 import { Button } from "@/components/ui/button";
@@ -115,7 +116,6 @@ export function ContactDetail() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const canWrite = !!profile?.role && profile.role !== "read_only";
-  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: contact, isLoading, isError, error, refetch } = useContact(id);
   const { data: originatingLead } = useOriginatingLead(id);
   const { data: contactTags = [] } = useContactTags(id);
@@ -128,6 +128,7 @@ export function ContactDetail() {
   const [showChangeOwner, setShowChangeOwner] = useState(false);
   const [showAddToList, setShowAddToList] = useState(false);
   const [showQuickCampaign, setShowQuickCampaign] = useState(false);
+  const [showAddToCampaign, setShowAddToCampaign] = useState(false);
   const { addRecent } = useRecentRecords();
 
   useEffect(() => {
@@ -221,12 +222,14 @@ export function ContactDetail() {
               <ListPlus className="h-4 w-4 mr-1" />
               Add to List
             </Button>
-            {isAdmin && (
-              <Button variant="outline" size="sm" onClick={() => setShowQuickCampaign(true)}>
+            <Button variant="outline" size="sm" onClick={() => setShowQuickCampaign(true)}>
                 <Megaphone className="h-4 w-4 mr-1" />
                 Start a Campaign
-              </Button>
-            )}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowAddToCampaign(true)}>
+              <Megaphone className="h-4 w-4 mr-1" />
+              Add to Campaign
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setShowChangeOwner(true)}>
               <UserRoundCog className="h-4 w-4 mr-1" />
               Change Owner
@@ -659,13 +662,16 @@ export function ContactDetail() {
         contactIds={[contact.id]}
       />
 
-      {isAdmin && (
-        <QuickCampaignDialog
+      <QuickCampaignDialog
           open={showQuickCampaign}
           onOpenChange={setShowQuickCampaign}
           contacts={[contact]}
-        />
-      )}
+      />
+      <AddToCampaignDialog
+        open={showAddToCampaign}
+        onOpenChange={setShowAddToCampaign}
+        contacts={[contact]}
+      />
 
       <ChangeOwnerDialog
         open={showChangeOwner}

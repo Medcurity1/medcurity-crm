@@ -93,6 +93,7 @@ export function CampaignsTab({
   onInboxHealthOpenChange: (o: boolean) => void;
 }) {
   const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: campaigns, isLoading, isError, refetch } = useCampaigns();
   const { data: sl, isLoading: slLoading, isError: slError, refetch: refetchSl } = useSmartleadStatus();
   const [searchParams] = useSearchParams();
@@ -263,6 +264,7 @@ export function CampaignsTab({
         inboxLabel={inboxLabelFor(c)}
         attention={attentionById.get(c.id)}
         onOpenDetail={(row) => { setDetailCampaign(row); setDetailOpen(true); }}
+        adminActions={isAdmin}
       />
     );
   }
@@ -288,14 +290,14 @@ export function CampaignsTab({
             <button type="button" className="camp-btn-primary" onClick={openCreate}>
               <Plus className="h-4 w-4" /> Create campaign
             </button>
-            <button type="button" className="camp-btn" onClick={() => refreshMut.mutate()} disabled={refreshMut.isPending}>
+            {isAdmin && <button type="button" className="camp-btn" onClick={() => refreshMut.mutate()} disabled={refreshMut.isPending}>
               {refreshMut.isPending ? (
                 <><Loader2 className="h-4 w-4 animate-spin" /> Syncing…</>
               ) : (
                 <><RefreshCw className="h-4 w-4" /> Sync Smartlead</>
               )}
-            </button>
-            {lastSyncedLabel(latestSync) && (
+            </button>}
+            {isAdmin && lastSyncedLabel(latestSync) && (
               <span className="text-[11px] text-muted-foreground">{lastSyncedLabel(latestSync)}</span>
             )}
           </>
@@ -309,14 +311,14 @@ export function CampaignsTab({
           </p>
         )}
         <span className="flex-1" />
-        <div className="flex items-center gap-1">
+        {isAdmin && <div className="flex items-center gap-1">
           <button type="button" className="camp-pill" aria-pressed={ownerFilter === "everyone"} onClick={() => setOwnerFilter("everyone")}>
             Everyone
           </button>
           <button type="button" className="camp-pill" aria-pressed={ownerFilter === "mine"} onClick={() => setOwnerFilter("mine")}>
             Mine
           </button>
-        </div>
+        </div>}
         <div className="relative">
           <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -338,7 +340,7 @@ export function CampaignsTab({
         </p>
       ) : null}
 
-      <CampaignReplies />
+      {isAdmin && <CampaignReplies />}
 
       {!isLoading && !isError && talliesError && (
         <div className="camp-card p-3 flex items-center gap-2 flex-wrap">
@@ -450,7 +452,7 @@ export function CampaignsTab({
             </DialogHeader>
           </div>
           <div className="camp-templates-body px-6 pb-6">
-            <TemplatesSection embedded onUseTemplate={openFromTemplate} />
+            <TemplatesSection embedded onUseTemplate={openFromTemplate} canManage={isAdmin} />
           </div>
         </DialogContent>
       </Dialog>

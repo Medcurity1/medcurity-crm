@@ -176,7 +176,11 @@ export default function App() {
                   <Route path="imports/:id" element={<AdminGate><LeadDetail /></AdminGate>} />
                   <Route path="imports/:id/edit" element={<LegacyImportEditRedirect />} />
                   <Route path="leads/*" element={<LeadsPathRedirect />} />
-                  <Route path="playbook" element={<AdminGate><PlaybookPage /></AdminGate>} />
+                  {/* Campaigns launched company-wide 2026-08-21. The route
+                      is available to every authenticated Pulse user; writes
+                      still go through the ownership/suppression checks in
+                      playbook-smartlead and table RLS. */}
+                  <Route path="playbook" element={<PlaybookPage />} />
                   {/* Collateral open to every signed-in user (Jordan's v1.2
                       change 7, 2026-08-18): read-only tab, only admin-promoted
                       Current assets. Data access follows the RLS role flag

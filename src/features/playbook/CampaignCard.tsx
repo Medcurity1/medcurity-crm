@@ -204,6 +204,7 @@ export function CampaignCard({
   inboxLabel,
   attention,
   onOpenDetail,
+  adminActions = true,
 }: {
   c: CampaignRow;
   analyze: ReturnType<typeof useAnalyzeCampaign>;
@@ -218,6 +219,7 @@ export function CampaignCard({
    *  card body (Campaigns overhaul S8). Optional so CampaignCard still works
    *  standalone without it. */
   onOpenDetail?: (c: CampaignRow) => void;
+  adminActions?: boolean;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const url = smartleadUrl(c.smartlead_campaign_id);
@@ -295,7 +297,7 @@ export function CampaignCard({
           {/* stopPropagation so clicking any action here never also opens the
              detail sheet underneath it (Campaigns overhaul S8). */}
           <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-            {c.status === "completed" && !c.analyzed_at && (
+            {adminActions && c.status === "completed" && !c.analyzed_at && (
               <Button
                 size="sm" variant="ai" className="h-8 text-xs"
                 disabled={analyze.isPending}
@@ -315,7 +317,7 @@ export function CampaignCard({
                 Smartlead <ExternalLink className="h-3 w-3" />
               </a>
             )}
-            {c.status === "draft" && (
+            {adminActions && c.status === "draft" && (
               <button
                 type="button"
                 title="Delete campaign"
@@ -340,7 +342,7 @@ export function CampaignCard({
         )}
       </div>
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      {adminActions && <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this campaign?</AlertDialogTitle>
@@ -358,7 +360,7 @@ export function CampaignCard({
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+      </AlertDialog>}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-// Campaigns — admin-only AI marketing/outreach hub (ported from Nexus as
+// Campaigns — company-wide outreach hub (ported from Nexus as
 // "Playbook"). Sub-tabs (in order): Campaigns (sequences — email + calls +
 // LinkedIn; the default), Playbook (weekly AI ideas), Newsletters (Mailchimp).
 // A Training slide-over feeds the AI.
@@ -21,9 +21,12 @@ import { IdeasTab } from "./IdeasTab";
 import { CampaignsTab } from "./CampaignsTab";
 import { NewslettersTab } from "./NewslettersTab";
 import { usePendingSuggestionCount } from "./api";
+import { useAuth } from "@/features/auth/AuthProvider";
 import "./campaigns.css";
 
 export function PlaybookPage() {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [tab, setTab] = useState("campaigns");
   const [trainingOpen, setTrainingOpen] = useState(false);
   const [insightsOpen, setInsightsOpen] = useState(false);
@@ -43,25 +46,31 @@ export function PlaybookPage() {
                   <LayoutTemplate className="h-4 w-4" />
                   Templates
                 </button>
-                <button type="button" className="camp-btn" onClick={() => setInboxHealthOpen(true)}>
-                  <Inbox className="h-4 w-4" />
-                  Sending inboxes
+                {isAdmin && (
+                  <button type="button" className="camp-btn" onClick={() => setInboxHealthOpen(true)}>
+                    <Inbox className="h-4 w-4" />
+                    Sending inboxes
+                  </button>
+                )}
+              </>
+            )}
+            {isAdmin && (
+              <>
+                <button type="button" className="camp-btn" onClick={() => setInsightsOpen(true)}>
+                  <Lightbulb className="h-4 w-4" />
+                  Insights
+                  {!!pendingCount && (
+                    <Badge variant="secondary" className="ml-0.5 h-4 min-w-4 px-1 text-[10px]">
+                      {pendingCount}
+                    </Badge>
+                  )}
+                </button>
+                <button type="button" className="camp-btn" onClick={() => setTrainingOpen(true)}>
+                  <Brain className="h-4 w-4" />
+                  Training
                 </button>
               </>
             )}
-            <button type="button" className="camp-btn" onClick={() => setInsightsOpen(true)}>
-              <Lightbulb className="h-4 w-4" />
-              Insights
-              {!!pendingCount && (
-                <Badge variant="secondary" className="ml-0.5 h-4 min-w-4 px-1 text-[10px]">
-                  {pendingCount}
-                </Badge>
-              )}
-            </button>
-            <button type="button" className="camp-btn" onClick={() => setTrainingOpen(true)}>
-              <Brain className="h-4 w-4" />
-              Training
-            </button>
           </div>
         }
       />
@@ -69,8 +78,8 @@ export function PlaybookPage() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="campaigns">Campaigns</TabsTrigger>
-          <TabsTrigger value="ideas">Ideas</TabsTrigger>
-          <TabsTrigger value="newsletters">Newsletters</TabsTrigger>
+          {isAdmin && <TabsTrigger value="ideas">Ideas</TabsTrigger>}
+          {isAdmin && <TabsTrigger value="newsletters">Newsletters</TabsTrigger>}
         </TabsList>
         <TabsContent value="campaigns">
           <CampaignsTab
@@ -80,16 +89,16 @@ export function PlaybookPage() {
             onInboxHealthOpenChange={setInboxHealthOpen}
           />
         </TabsContent>
-        <TabsContent value="ideas">
+        {isAdmin && <TabsContent value="ideas">
           <IdeasTab />
-        </TabsContent>
-        <TabsContent value="newsletters">
+        </TabsContent>}
+        {isAdmin && <TabsContent value="newsletters">
           <NewslettersTab />
-        </TabsContent>
+        </TabsContent>}
       </Tabs>
 
-      <TrainingPanel open={trainingOpen} onOpenChange={setTrainingOpen} />
-      <InsightsPanel open={insightsOpen} onOpenChange={setInsightsOpen} />
+      {isAdmin && <TrainingPanel open={trainingOpen} onOpenChange={setTrainingOpen} />}
+      {isAdmin && <InsightsPanel open={insightsOpen} onOpenChange={setInsightsOpen} />}
     </div>
   );
 }

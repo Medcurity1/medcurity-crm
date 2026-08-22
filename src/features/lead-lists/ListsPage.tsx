@@ -64,7 +64,8 @@ import {
 } from "@/components/ui/context-menu";
 import { AddToListDialog } from "./AddToListDialog";
 import { PastePeopleDialog } from "./PastePeopleDialog";
-import { QuickCampaignDialog } from "@/features/playbook/QuickCampaignDialog";
+import { QuickCampaignDialog, type QuickCampaignContact } from "@/features/playbook/QuickCampaignDialog";
+import { fetchRecipientsByList } from "@/features/playbook/api";
 import { useTags } from "@/features/tags/api";
 import { useUsers } from "@/features/accounts/api";
 import { US_STATES } from "@/lib/us-states";
@@ -321,7 +322,6 @@ function ListWorkspace({
   const { profile } = useAuth();
   const role = profile?.role ?? "";
   const canWrite = ["sales", "renewals", "admin", "super_admin"].includes(role);
-  const isAdmin = ["admin", "super_admin"].includes(role);
 
   const staticMembers = useLeadListMembers(list.is_dynamic ? undefined : list.id);
   const smartMembers = useSmartListMembers(list.is_dynamic ? list : null);
@@ -386,7 +386,8 @@ function ListWorkspace({
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [showRemoved, setShowRemoved] = useState(false);
-  const [campaignContacts, setCampaignContacts] = useState<WorkRow[] | null>(null);
+  const [campaignContacts, setCampaignContacts] = useState<QuickCampaignContact[] | null>(null);
+  const [campaignGathering, setCampaignGathering] = useState(false);
   const [addToListIds, setAddToListIds] = useState<string[] | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(() => {
     try {
@@ -397,6 +398,39 @@ function ListWorkspace({
   });
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [pasteOpen, setPasteOpen] = useState(false);
+
+  function rowsToCampaignContacts(source: WorkRow[]): QuickCampaignContact[] {
+    return source.map((r) => ({
+      id: r.contactId,
+      first_name: r.firstName,
+      last_name: r.lastName,
+      email: r.email,
+      account: r.account ? { name: r.account } : null,
+    }));
+  }
+
+  async function startWholeListCampaign() {
+    setCampaignGathering(true);
+    try {
+      const recipients = await fetchRecipientsByList(list);
+      if (recipients.length > 10_000) {
+        toast.error("This list has more than 10,000 email-ready people. Narrow it before starting a campaign.");
+        return;
+      }
+      setCampaignContacts(recipients.map((r) => ({
+        id: r.contact_id ?? r.email,
+        first_name: r.first_name ?? null,
+        last_name: r.last_name ?? null,
+        email: r.email,
+        account_id: r.account_id ?? null,
+        account: r.company_name ? { name: r.company_name } : null,
+      })));
+    } catch (error) {
+      toast.error("Couldn't gather this list: " + (error as Error).message);
+    } finally {
+      setCampaignGathering(false);
+    }
+  }
 
   function toggleSort(key: SortKey) {
     setSort((prev) => {
@@ -528,17 +562,15 @@ function ListWorkspace({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {isAdmin && (
-            <Button
+          <Button
               size="sm"
               className="gap-1.5"
-              disabled={rows.length === 0}
-              onClick={() => setCampaignContacts(rows)}
+              disabled={rows.length === 0 || campaignGathering}
+              onClick={() => void startWholeListCampaign()}
             >
               <Megaphone className="h-4 w-4" />
-              Start campaign
-            </Button>
-          )}
+              {campaignGathering ? "Gathering…" : "Start campaign"}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
             <Pencil className="h-4 w-4 mr-1" />
             {list.is_dynamic ? "Edit rules" : "Rename"}
@@ -656,16 +688,14 @@ function ListWorkspace({
           >
             Add to another list…
           </Button>
-          {isAdmin && (
-            <Button
+          <Button
               variant="outline"
               size="sm"
-              onClick={() => setCampaignContacts(selectedRows)}
+              onClick={() => setCampaignContacts(rowsToCampaignContacts(selectedRows))}
             >
               <Megaphone className="h-4 w-4 mr-1" />
               Start a campaign…
-            </Button>
-          )}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => copyEmails(selectedRows)}>
             <ClipboardCopy className="h-4 w-4 mr-1" />
             Copy emails
@@ -792,11 +822,9 @@ function ListWorkspace({
                     <ContextMenuItem onClick={() => setAddToListIds([row.contactId])}>
                       Add to another list…
                     </ContextMenuItem>
-                    {isAdmin && (
-                      <ContextMenuItem onClick={() => setCampaignContacts([row])}>
-                        Start a campaign…
-                      </ContextMenuItem>
-                    )}
+                    <ContextMenuItem onClick={() => setCampaignContacts(rowsToCampaignContacts([row]))}>
+                      Start a campaign…
+                    </ContextMenuItem>
                     <ContextMenuItem
                       className="text-destructive focus:text-destructive"
                       onClick={() => removeRow(row)}
@@ -900,19 +928,13 @@ function ListWorkspace({
           contactIds={addToListIds}
         />
       )}
-      {isAdmin && campaignContacts && (
+      {campaignContacts && (
         <QuickCampaignDialog
           open
           onOpenChange={(o) => {
             if (!o) setCampaignContacts(null);
           }}
-          contacts={campaignContacts.map((r) => ({
-            id: r.contactId,
-            first_name: r.firstName,
-            last_name: r.lastName,
-            email: r.email,
-            account: r.account ? { name: r.account } : null,
-          }))}
+          contacts={campaignContacts}
         />
       )}
     </div>

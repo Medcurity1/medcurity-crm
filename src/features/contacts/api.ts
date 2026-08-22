@@ -21,6 +21,26 @@ export interface ContactFilters {
   sortDirection?: "asc" | "desc";
 }
 
+/** Resolve a selection by ID for Campaigns without depending on the currently
+ * visible table page. Archived/import-pen rows stay out of outreach paths. */
+export async function fetchCampaignContactsByIds(contactIds: string[]) {
+  const uniqueIds = Array.from(new Set(contactIds));
+  if (!uniqueIds.length) return [];
+  return hydrateInChunks(uniqueIds, async (batch) => {
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, first_name, last_name, email, account_id, account:accounts!account_id(name)")
+      .in("id", batch)
+      .is("archived_at", null)
+      .is("import_status", null);
+    if (error) throw error;
+    return (data ?? []).map((contact) => ({
+      ...contact,
+      account: Array.isArray(contact.account) ? (contact.account[0] ?? null) : contact.account,
+    }));
+  });
+}
+
 export function useContacts(filters?: ContactFilters) {
   return useQuery({
     queryKey: ["contacts", filters],

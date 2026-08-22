@@ -2065,11 +2065,8 @@ function readRecentPulls(): RecentPull[] {
 }
 
 export function ReportBuilder({ mode = "full" }: { mode?: "full" | "people" } = {}) {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const isPeople = mode === "people";
-  const isAdmin = ["admin", "super_admin"].includes(
-    (profile as { role?: string } | null)?.role ?? "",
-  );
   const [activeTab, setActiveTab] = useState("builder");
   const allowedEntities = mode === "people" ? (["contacts", "accounts"] as const) : undefined;
 
@@ -2618,7 +2615,7 @@ export function ReportBuilder({ mode = "full" }: { mode?: "full" | "people" } = 
                             <ListChecks className="h-4 w-4 mr-1.5" />
                             {listFetching ? "Gathering…" : "Save as list"}
                           </Button>
-                          {config.entity === "contacts" && isAdmin && (
+                          {config.entity === "contacts" && (
                             <Button
                               variant="outline"
                               disabled={campaignFetching}

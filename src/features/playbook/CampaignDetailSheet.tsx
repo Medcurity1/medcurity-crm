@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { formatName, formatDate, formatDateOnly, formatDateTime, formatRelativeDate, formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { QueryError } from "@/components/QueryError";
 import { SequenceTimeline } from "./SequenceTimeline";
 import { deliverySummary, normalizeDeliverySettings } from "./delivery-settings";
@@ -96,6 +97,8 @@ export function CampaignDetailSheet({
   setStatus: ReturnType<typeof useSetCampaignStatus>;
   inboxLabel?: string | null;
 }) {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const campaignId = campaign?.id ?? null;
   const { data: enrollments, isLoading: enrollmentsLoading } = useCampaignEnrollments(campaignId);
   const { data: events, isLoading: eventsLoading } = useCampaignEvents(campaignId);
@@ -219,7 +222,7 @@ export function CampaignDetailSheet({
               ) : (
                 <span className="text-amber-600">Live updates: not connected</span>
               )}
-              <Button
+              {isAdmin && <Button
                 size="sm" variant="outline" className="h-6 px-2 text-xs"
                 disabled={repairWebhook.isPending}
                 onClick={() => repairWebhook.mutate(c.id)}
@@ -231,8 +234,8 @@ export function CampaignDetailSheet({
                 ) : (
                   "Repair live updates"
                 )}
-              </Button>
-              {Number(c.metrics?.sent) > 0 && (
+              </Button>}
+              {isAdmin && Number(c.metrics?.sent) > 0 && (
                 <Button
                   size="sm" variant="ai" className="h-6 px-2 text-xs"
                   disabled={freshInsights.isPending}

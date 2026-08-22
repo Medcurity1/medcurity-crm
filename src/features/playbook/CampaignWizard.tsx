@@ -36,6 +36,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { defaultSenderForUser, senderDisplayLabel } from "./sender-default";
 import { useTags } from "@/features/tags/api";
 import { formatRelativeDate } from "@/lib/formatters";
 import { CampaignRecipients } from "./CampaignRecipients";
@@ -231,7 +232,8 @@ export function CampaignWizard({
    *  stale list from a previous open never leaks in. */
   initialRecipients?: Recipient[];
 }) {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const hasLockedRecipients = (initialRecipients?.length ?? 0) > 0;
   const [step, setStep] = useState<Step>(initialLaunchStep(mode, hasLockedRecipients));
   const [description, setDescription] = useState(initialDescription);
@@ -317,6 +319,21 @@ export function CampaignWizard({
   // step (Campaigns overhaul Phase 5's "Sending inboxes" note below).
   const { data: inboxHealth } = useInboxHealth(step === 3);
   const launch = useLaunchCampaign();
+
+  // Pick only an exact, validated launch-night mapping. Unknown users and
+  // stale/mismatched Smartlead rows stay unselected so the user must choose.
+  // Once the user changes the picker, this effect never overrides them.
+  useEffect(() => {
+    if (!open || inboxId || !inboxes?.length) return;
+    const preferred = defaultSenderForUser(user?.email, inboxes);
+    if (preferred) setInboxId(String(preferred.id));
+  }, [open, inboxId, inboxes, user?.email]);
+
+  useEffect(() => {
+    if (open && !isAdmin && profile?.id && ownerId !== profile.id) {
+      setOwnerId(profile.id);
+    }
+  }, [open, isAdmin, ownerId, profile?.id]);
 
   // Two independent soft-alert rails against the SAME raw recipient list —
   // Do-Not-Email (S2) and "already actively enrolled elsewhere" (S3). A
@@ -771,7 +788,7 @@ export function CampaignWizard({
   const confirmTouchCount = flow === "template" ? templateTaskSteps.length : 0;
   const confirmEmailsIncomplete = flow === "template" && incompleteTemplateEmails.length > 0;
   const confirmInboxLabel = selectedInbox
-    ? (selectedInbox.from_email ?? selectedInbox.from_name ?? `Inbox ${selectedInbox.id}`)
+    ? senderDisplayLabel(selectedInbox)
     : "No sending inbox picked";
   const copyReady = flow === "ai"
     ? !!campaign && campaign.sequence.length > 0 && !aiEmailsIncomplete
@@ -1394,7 +1411,7 @@ export function CampaignWizard({
                   )}
                   </div>
 
-                  <div className="space-y-1">
+                  {isAdmin ? <div className="space-y-1">
                     <Label className="text-xs">Campaign owner</Label>
                     <Select value={ownerId} onValueChange={setOwnerId}>
                       <SelectTrigger><SelectValue placeholder="Pick an owner…" /></SelectTrigger>
@@ -1403,14 +1420,22 @@ export function CampaignWizard({
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">Tasks and reply alerts go to each person's owner. This covers people without one.</p>
-                  </div>
+                  </div> : (
+                    <div className="space-y-1">
+                      <Label className="text-xs">Campaign owner</Label>
+                      <p className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: "var(--camp-line)" }}>
+                        {profile?.full_name ?? "You"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">You own this campaign. Contact owners still receive their assigned tasks and reply alerts.</p>
+                    </div>
+                  )}
 
                   <div className="space-y-1">
                     <Label className="text-xs">Sending inbox</Label>
                     <Select value={inboxId} onValueChange={setInboxId}>
                       <SelectTrigger><SelectValue placeholder="Pick an inbox…" /></SelectTrigger>
                       <SelectContent>
-                        {(inboxes ?? []).map((a) => <SelectItem key={a.id} value={String(a.id)}>{a.from_email ?? a.from_name ?? `Inbox ${a.id}`}</SelectItem>)}
+                        {(inboxes ?? []).map((a) => <SelectItem key={a.id} value={String(a.id)}>{senderDisplayLabel(a)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                     {selectedInboxHealth && (selectedInboxHealth.campaigns.length > 0 || inboxHeadroom != null) && (

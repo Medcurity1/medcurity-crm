@@ -120,6 +120,9 @@ const navItems: NavItem[] = [
   // intended audience. ADMIN badge dropped; the red New tag announces the
   // new destination (Nathan 8/18: New, not Launched, for this one).
   { to: "/collateral", icon: FolderOpen, label: "Collateral", badge: { label: "New", className: NEW_BADGE } },
+  // Company-wide Campaigns launch (Nathan 2026-08-21). The stable route
+  // remains /playbook; every authenticated role gets the same entry point.
+  { to: "/playbook", icon: Megaphone, label: "Campaigns", badge: { label: "New", className: NEW_BADGE } },
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
   // "New" badge retired 2026-07-02 (Nathan).
   // Requests tab removed 2026-08-04 (Nathan): it's now the Submit Request
@@ -135,10 +138,6 @@ const navItems: NavItem[] = [
 ];
 
 const adminItems: NavItem[] = [
-  // Campaigns = the AI marketing/outreach hub ported from Nexus (renamed from
-  // "Playbook"). AI ideas + Smartlead cold email + newsletters. Route stays
-  // /playbook for stable deep-links. Admin-only (for now).
-  { to: "/playbook", icon: Megaphone, label: "Campaigns", badge: { label: "Admin", className: ADMIN_BADGE } },
   // Collateral moved into navItems 2026-08-18 (Jordan's v1.2 change 7).
   // Imports = the admin-only landing pen for raw lists (renamed from
   // "Leads" 2026-07-20 after the prod lead cleanup; reps don't see it —

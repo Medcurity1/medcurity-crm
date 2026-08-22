@@ -29,7 +29,7 @@ describe("announcement banner mobile layout", () => {
       .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*") && !line.trim().startsWith("/*"))
       .join("\n");
     expect(runtime).not.toMatch(/—/);
-    expect(banner).toContain('title: "New: Collateral"');
-    expect(banner).toContain('ctaLabel: "Open Collateral"');
+    expect(banner).toContain('title: "Campaigns is now open to everyone"');
+    expect(banner).toContain('ctaLabel: "Open Campaigns"');
   });
 });
