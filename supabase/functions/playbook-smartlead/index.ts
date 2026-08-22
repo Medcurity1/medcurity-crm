@@ -918,6 +918,236 @@ interface LaunchInput {
   enrollment_overrides?: string[];
 }
 
+interface AddRecipientsInput {
+  campaign_id: string;
+  recipients: Recipient[];
+  suppression_overrides?: string[];
+  enrollment_overrides?: string[];
+}
+
+/** Add people to an existing Pulse-owned Smartlead campaign without creating
+ * another campaign. This deliberately reuses the launch rails (suppression,
+ * global active-enrollment check, launch claims, Smartlead upload,
+ * first-send scheduling and idempotent task spawning). Local enrollment is
+ * written only for addresses Smartlead accepted. If the local write fails,
+ * every uploaded lead is removed from Smartlead; rollback residue is named
+ * explicitly rather than returning a false success. */
+async function addRecipientsToExistingCampaign(p: AddRecipientsInput, callerCtx: CallerContext) {
+  if (!p.campaign_id || !Array.isArray(p.recipients) || !p.recipients.length) {
+    throw new Error("campaign_id and recipients are required");
+  }
+  if (p.recipients.length > 10_000) throw new Error("Add at most 10,000 recipients at a time.");
+
+  const { data: campaign, error: campaignErr } = await svc
+    .from("campaigns")
+    .select("id, name, owner_user_id, smartlead_campaign_id, status, anchor_date, leads_per_day, settings")
+    .eq("id", p.campaign_id)
+    .maybeSingle();
+  if (campaignErr) throw new Error("Couldn't load campaign: " + campaignErr.message);
+  if (!campaign) throw new Error("Campaign not found.");
+  if (!callerCtx.isAdmin && (!callerCtx.userId || campaign.owner_user_id !== callerCtx.userId)) {
+    throw new Error("You can only add people to campaigns you own.");
+  }
+  if (campaign.status !== "active" && campaign.status !== "draft") {
+    throw new Error("People can only be added to a draft or active campaign.");
+  }
+  const smartleadCampaignId = Number(campaign.smartlead_campaign_id);
+  if (!Number.isInteger(smartleadCampaignId) || smartleadCampaignId <= 0) {
+    throw new Error("This campaign is not connected to Smartlead.");
+  }
+
+  // Deterministic input dedupe: same contact OR same normalized email is one
+  // person. Invalid/blank addresses are excluded before any external write.
+  const seenEmails = new Set<string>();
+  const seenContacts = new Set<string>();
+  const unique: Recipient[] = [];
+  let duplicates_dropped = 0;
+  let invalid_dropped = 0;
+  for (const recipient of p.recipients) {
+    const email = normalizeEmail(recipient.email);
+    if (!email || !email.includes("@")) { invalid_dropped++; continue; }
+    if (seenEmails.has(email) || (!!recipient.contact_id && seenContacts.has(recipient.contact_id))) {
+      duplicates_dropped++;
+      continue;
+    }
+    seenEmails.add(email);
+    if (recipient.contact_id) seenContacts.add(recipient.contact_id);
+    unique.push({ ...recipient, email });
+  }
+  if (!unique.length) throw new Error("No valid, unique email addresses were provided.");
+
+  const suppression = await fetchSuppressionForEmails(unique.map((r) => r.email));
+  const suppressionOverrides = Array.isArray(p.suppression_overrides) ? p.suppression_overrides : [];
+  const partition = partitionSuppressedEmails(unique.map((r) => r.email), suppression, suppressionOverrides);
+  const afterSuppression = unique.filter((r) => partition.eligible.has(r.email));
+  const suppression_dropped = unique.length - afterSuppression.length;
+  if (!afterSuppression.length) throw new Error("Every recipient is on the Do-Not-Email list.");
+
+  // Same-campaign duplicates are never overridable. Global active enrollment
+  // in another campaign remains an explicit user override, matching launch.
+  const sameCampaign = new Set<string>();
+  for (let offset = 0; offset < afterSuppression.length; offset += 500) {
+    const emailBatch = afterSuppression.slice(offset, offset + 500).map((r) => r.email);
+    const { data: sameCampaignRows, error: sameErr } = await svc
+      .from("campaign_enrollments")
+      .select("email")
+      .eq("campaign_id", campaign.id)
+      .in("email", emailBatch);
+    if (sameErr) throw new Error("Couldn't check existing campaign members: " + sameErr.message);
+    for (const row of sameCampaignRows ?? []) sameCampaign.add(normalizeEmail(row.email as string));
+  }
+  const notAlreadyHere = afterSuppression.filter((r) => !sameCampaign.has(r.email));
+  const already_in_campaign_dropped = afterSuppression.length - notAlreadyHere.length;
+  if (!notAlreadyHere.length) throw new Error("Everyone selected is already in this campaign.");
+
+  const overrides = new Set((p.enrollment_overrides ?? []).map(normalizeEmail));
+  const activeElsewhere = await fetchActiveEnrollmentEmails(notAlreadyHere.map((r) => r.email));
+  const enrollable = notAlreadyHere.filter((r) => !activeElsewhere.has(r.email) || overrides.has(r.email));
+  const active_elsewhere_dropped = notAlreadyHere.length - enrollable.length;
+  if (!enrollable.length) throw new Error("Everyone selected is already active in another campaign.");
+
+  const claimEmails = enrollable.map((r) => r.email);
+  const { data: conflictRows, error: claimErr } = await svc.rpc("campaign_launch_claim_emails", { p_emails: claimEmails });
+  if (claimErr) throw new Error("Couldn't reserve recipients: " + claimErr.message);
+  const conflicts = new Set((conflictRows ?? []) as string[]);
+  const claimed = claimEmails.filter((email) => !conflicts.has(email));
+  const ready = enrollable.filter((r) => !conflicts.has(r.email));
+  const concurrent_dropped = enrollable.length - ready.length;
+  if (!ready.length) throw new Error("Every recipient is being added by another launch right now. Try again shortly.");
+
+  const uploaded: Recipient[] = [];
+  const failed_emails: string[] = [];
+  const insertedIds: string[] = [];
+  let smartlead_rollback_failed = 0;
+  let local_rollback_failed = false;
+  try {
+    for (let offset = 0; offset < ready.length; offset += 400) {
+      const batch = ready.slice(offset, offset + 400);
+      const leads = batch.map((r) => ({
+        email: r.email, first_name: r.first_name ?? "", last_name: r.last_name ?? "", company_name: r.company_name ?? "",
+      }));
+      let accepted = false;
+      for (let attempt = 0; attempt < 2 && !accepted; attempt++) {
+        try {
+          await smartleadFetch(`/campaigns/${smartleadCampaignId}/leads`, {
+            method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ lead_list: leads }),
+          });
+          accepted = true;
+        } catch {
+          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+      if (accepted) uploaded.push(...batch);
+      else failed_emails.push(...batch.map((r) => r.email));
+    }
+    if (!uploaded.length) throw new Error("Smartlead did not accept any recipients.");
+
+    const rows = uploaded.map((r) => ({
+      contact_id: r.contact_id ?? null,
+      account_id: r.account_id ?? null,
+      owner_user_id: campaign.owner_user_id,
+      email: r.email,
+      first_name: r.first_name ?? "",
+      last_name: r.last_name ?? "",
+      company: r.company_name ?? "",
+      status: "active",
+      current_step: 0,
+      first_send_at: null,
+    }));
+    const { data: inserted, error: insertErr } = await svc.rpc("campaign_enrollments_append", {
+      p_campaign_id: campaign.id,
+      p_rows: rows,
+    });
+    if (insertErr) throw new Error("Enrollment insert failed: " + insertErr.message);
+    insertedIds.push(...((inserted ?? []) as { id: string }[]).map((row) => row.id));
+
+    let tasks_created = 0;
+    if (campaign.status === "active") {
+      const { data: allEnrollments, error: allErr } = await svc
+        .from("campaign_enrollments")
+        .select("id, enroll_position, first_send_at")
+        .eq("campaign_id", campaign.id)
+        .order("enroll_position", { ascending: true });
+      if (allErr) throw new Error("Couldn't schedule new enrollments: " + allErr.message);
+      const settings = (campaign.settings ?? {}) as Record<string, unknown>;
+      const delivery = (settings.delivery ?? settings.schedule ?? {}) as Record<string, unknown>;
+      const days = Array.isArray(delivery.days_of_week) ? delivery.days_of_week as number[] : [1, 2, 3, 4, 5];
+      await backfillFirstSendDates(
+        (allEnrollments ?? []) as { id: string; enroll_position: number; first_send_at?: string | null }[],
+        (campaign.anchor_date as string | null) ?? todayISODate(),
+        Number(campaign.leads_per_day) || 20,
+        days,
+      );
+      tasks_created = (await spawnCampaignTasks(campaign.id)).tasksCreated;
+    }
+
+    const activities = uploaded.filter((r) => r.contact_id).map((r) => ({
+      activity_type: "email",
+      subject: `Campaign: ${campaign.name}`,
+      body: `Added to Smartlead campaign "${campaign.name}".`,
+      email_direction: "sent",
+      email_to: [r.email],
+      contact_id: r.contact_id,
+      account_id: r.account_id ?? null,
+      owner_user_id: campaign.owner_user_id,
+      activity_date: new Date().toISOString(),
+    }));
+    if (activities.length) {
+      const { error: activityErr } = await svc.from("activities").insert(activities);
+      if (activityErr) console.error("add-recipients: activity logging failed:", activityErr.message);
+    }
+    try {
+      await auditCampaignAction("campaign_recipients_added", campaign.id, callerCtx.auditUserId, {
+        requested: p.recipients.length, enrolled: insertedIds.length, smartlead_failed: failed_emails.length,
+      });
+    } catch (auditErr) {
+      // Auditing is observability, not part of the cross-system transaction.
+      // Never unwind already-scheduled enrollments solely because it failed.
+      console.error("add-recipients: audit logging failed:", (auditErr as Error).message);
+    }
+    return {
+      success: true,
+      requested: p.recipients.length,
+      enrolled: insertedIds.length,
+      suppression_dropped,
+      active_elsewhere_dropped,
+      already_in_campaign_dropped,
+      duplicates_dropped,
+      invalid_dropped,
+      concurrent_dropped,
+      smartlead_failed: failed_emails.length,
+      failed_emails: failed_emails.slice(0, 200),
+      tasks_created,
+    };
+  } catch (error) {
+    // If local rows landed but later scheduling failed, remove those rows
+    // before removing Smartlead leads so a retry cannot duplicate either side.
+    if (insertedIds.length) {
+      const { error: localDeleteErr } = await svc.from("campaign_enrollments").delete().in("id", insertedIds);
+      local_rollback_failed = !!localDeleteErr;
+    }
+    for (const recipient of uploaded) {
+      try {
+        const leadId = await resolveSmartleadLeadId(smartleadCampaignId, recipient.email);
+        if (leadId == null) { smartlead_rollback_failed++; continue; }
+        await smartleadFetch(`/campaigns/${smartleadCampaignId}/leads/${leadId}`, { method: "DELETE" });
+      } catch { smartlead_rollback_failed++; }
+    }
+    if (local_rollback_failed || smartlead_rollback_failed) {
+      const residue = [
+        local_rollback_failed ? "local enrollment rows" : "",
+        smartlead_rollback_failed ? `${smartlead_rollback_failed} Smartlead lead(s)` : "",
+      ].filter(Boolean).join(" and ");
+      throw new Error(`${(error as Error).message} Rollback could not remove ${residue}; review the campaign before retrying.`);
+    }
+    throw error;
+  } finally {
+    if (claimed.length) {
+      try { await svc.rpc("campaign_launch_release_emails", { p_emails: claimed }); } catch { /* TTL backstop */ }
+    }
+  }
+}
+
 /**
  * For every ACTIVE enrollment on this campaign that hasn't had its tasks
  * spawned yet (tasks_spawned_at is null) and has a known first_send_at,
@@ -3750,6 +3980,7 @@ Deno.serve(async (req) => {
       "email-accounts",
       "inbox-health",
       "launch",
+      "add-recipients",
       "set-campaign-status",
       "set-enrollment-status",
     ]);
@@ -3869,6 +4100,9 @@ Deno.serve(async (req) => {
       return json(await updateEmailAccountDailyLimit(body.email_account_id, body.daily_limit));
     }
     if (action === "launch") return json(await launch(body as unknown as LaunchInput, callerCtx));
+    if (action === "add-recipients") {
+      return json(await addRecipientsToExistingCampaign(body as unknown as AddRecipientsInput, callerCtx));
+    }
     if (action === "set-campaign-status") {
       // Reuse the uid already fetched for a rep caller above; an admin/
       // service-role caller still needs one resolved fresh (archivedBy is

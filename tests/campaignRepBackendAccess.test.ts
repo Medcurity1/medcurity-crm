@@ -13,7 +13,7 @@ describe("Campaigns company rollout backend boundary", () => {
       edge.indexOf("const REP_ELIGIBLE_ACTIONS"),
       edge.indexOf("let repUserId", edge.indexOf("const REP_ELIGIBLE_ACTIONS")),
     );
-    for (const action of ["status", "email-accounts", "inbox-health", "launch", "set-campaign-status", "set-enrollment-status"]) {
+    for (const action of ["status", "email-accounts", "inbox-health", "launch", "add-recipients", "set-campaign-status", "set-enrollment-status"]) {
       expect(allowlist).toContain(`"${action}"`);
     }
     for (const adminOnly of ["sync", "refresh", "import", "daily-sweep", "delete-campaign", "update-email-account-signature", "update-email-account-daily-limit"] ) {
@@ -40,5 +40,37 @@ describe("Campaigns company rollout backend boundary", () => {
     expect(launch).toContain("if (!callerCtx.isAdmin)");
     expect(launch).toContain("p.owner_id = callerCtx.userId");
     expect(launch).not.toContain("p.owner_id !== callerCtx.userId");
+  });
+
+  it("adds recipients through the same safety rails with explicit rollback evidence", () => {
+    const add = edge.slice(
+      edge.indexOf("async function addRecipientsToExistingCampaign"),
+      edge.indexOf("async function spawnCampaignTasks"),
+    );
+    expect(add).toContain('campaign.status !== "active" && campaign.status !== "draft"');
+    expect(add).toContain("campaign.owner_user_id !== callerCtx.userId");
+    expect(add).toContain("fetchSuppressionForEmails");
+    expect(add).toContain("partitionSuppressedEmails");
+    expect(add).toContain("fetchActiveEnrollmentEmails");
+    expect(add).toContain("campaign_launch_claim_emails");
+    expect(add).toContain(`/campaigns/\${smartleadCampaignId}/leads`);
+    expect(add).toContain('svc.rpc("campaign_enrollments_append"');
+    expect(add).toContain("backfillFirstSendDates");
+    expect(add).toContain("spawnCampaignTasks");
+    expect(add).toContain("smartlead_rollback_failed");
+    expect(add).toContain("local_rollback_failed");
+    expect(add).toContain("campaign_launch_release_emails");
+    expect(edge).toContain('action === "add-recipients"');
+  });
+
+  it("allocates add-recipient positions atomically through a service-role-only RPC", () => {
+    const migration = readFileSync(
+      path.resolve(__dirname, "../supabase/migrations/20260822004500_campaign_add_recipients_atomic.sql"),
+      "utf8",
+    );
+    expect(migration).toContain("for update");
+    expect(migration).toContain("with ordinality");
+    expect(migration).toContain("revoke all on function public.campaign_enrollments_append(uuid, jsonb) from public, anon, authenticated");
+    expect(migration).toContain("grant execute on function public.campaign_enrollments_append(uuid, jsonb) to service_role");
   });
 });
