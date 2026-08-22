@@ -1380,7 +1380,13 @@ async function linkAudienceDraft(
     p_new_status: "draft_linked",
     p_draft_id: draftId,
   });
-  if (linkErr) throw new Error("Failed to link audience to draft: " + linkErr.message);
+  if (linkErr) {
+    // Unique index violation means another run is already linked to this draft
+    if (linkErr.code === "23505" || (linkErr.message ?? "").includes("unique")) {
+      throw new AudienceActionError("This draft is already linked to another audience run", 409);
+    }
+    throw new Error("Failed to link audience to draft: " + linkErr.message);
+  }
 
   return { success: true };
 }

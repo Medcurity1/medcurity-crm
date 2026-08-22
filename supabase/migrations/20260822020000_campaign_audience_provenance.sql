@@ -130,6 +130,10 @@ create index if not exists idx_audience_runs_user
 create index if not exists idx_audience_runs_campaign
   on public.campaign_audience_runs(campaign_id)
   where campaign_id is not null;
+-- One draft can link at most one run (prevents multi-link)
+create unique index if not exists idx_audience_runs_draft_unique
+  on public.campaign_audience_runs(draft_id)
+  where draft_id is not null;
 
 alter table public.campaign_audience_runs enable row level security;
 
@@ -774,53 +778,60 @@ declare
   v_run_draft  uuid;
   v_draft_user uuid;
 begin
+  -- All three parameters are required (no null fallthrough)
+  if p_run_id is null then
+    raise exception 'run_id is required';
+  end if;
+  if p_draft_id is null then
+    raise exception 'draft_id is required';
+  end if;
   if p_user_id is null then
     raise exception 'user_id is required';
   end if;
 
-  -- Lock run first
-  if p_run_id is not null then
-    select status, user_id, draft_id
-      into v_run_status, v_run_user, v_run_draft
-      from public.campaign_audience_runs
-      where id = p_run_id
-      for update;
+  -- Lock and validate run
+  select status, user_id, draft_id
+    into v_run_status, v_run_user, v_run_draft
+    from public.campaign_audience_runs
+    where id = p_run_id
+    for update;
 
-    if found then
-      if v_run_user is distinct from p_user_id then
-        raise exception 'You do not own this audience run';
-      end if;
-      if v_run_draft is not null and p_draft_id is not null and v_run_draft is distinct from p_draft_id then
-        raise exception 'Run draft_id does not match the draft being discarded';
-      end if;
-
-      -- Bypass immutability trigger for this transaction
-      set local app.audience_provenance_rpc = 'true';
-
-      -- Expire run and clear draft_id atomically
-      if v_run_status in ('preview', 'draft_linked') then
-        update public.campaign_audience_runs
-        set status = 'expired',
-            draft_id = null
-        where id = p_run_id;
-      end if;
-    end if;
+  if not found then
+    raise exception 'Audience run not found';
+  end if;
+  if v_run_user is distinct from p_user_id then
+    raise exception 'You do not own this audience run';
+  end if;
+  if v_run_status != 'draft_linked' then
+    raise exception 'Run status must be draft_linked to discard, got: %', v_run_status;
+  end if;
+  if v_run_draft is null or v_run_draft is distinct from p_draft_id then
+    raise exception 'Run draft_id does not match the draft being discarded';
   end if;
 
-  -- Delete draft (safe even if run was not found/already expired)
-  if p_draft_id is not null then
-    select user_id into v_draft_user
-      from public.campaign_drafts
-      where id = p_draft_id
-      for update;
+  -- Lock and validate draft
+  select user_id into v_draft_user
+    from public.campaign_drafts
+    where id = p_draft_id
+    for update;
 
-    if found then
-      if v_draft_user is distinct from p_user_id then
-        raise exception 'You do not own this draft';
-      end if;
-      delete from public.campaign_drafts where id = p_draft_id;
-    end if;
+  if not found then
+    raise exception 'Draft not found';
   end if;
+  if v_draft_user is distinct from p_user_id then
+    raise exception 'You do not own this draft';
+  end if;
+
+  -- Bypass immutability trigger for this transaction
+  set local app.audience_provenance_rpc = 'true';
+
+  -- Expire run and clear draft_id atomically, then delete draft
+  update public.campaign_audience_runs
+  set status = 'expired',
+      draft_id = null
+  where id = p_run_id;
+
+  delete from public.campaign_drafts where id = p_draft_id;
 end;
 $$;
 
@@ -829,7 +840,47 @@ revoke all on function public.discard_ai_audience_draft(uuid, uuid, uuid)
 grant execute on function public.discard_ai_audience_draft(uuid, uuid, uuid)
   to service_role;
 
--- ── 12. Retention scheduling (NOT done by this migration) ────────────────
+-- ── 12. BEFORE DELETE trigger on campaign_drafts ─────────────────────────
+--
+-- Safety net: if a draft is deleted by any path (direct SQL, cascade,
+-- cleanup) and a campaign_audience_run references it via draft_id, the
+-- trigger atomically expires the run and clears draft_id before the
+-- FK ON DELETE SET NULL fires.  Without this, the immutability trigger
+-- on campaign_audience_runs would block the SET NULL update because no
+-- GUC bypass is set.  Non-AI drafts (no linked run) pass through
+-- unchanged.  The explicit discard_ai_audience_draft RPC is still the
+-- preferred path; this is the safety net.
+
+create or replace function public.campaign_drafts_before_delete_expire_runs()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- Find any audience run linked to this draft and expire it
+  if exists (
+    select 1 from public.campaign_audience_runs
+    where draft_id = old.id
+      and status in ('preview', 'draft_linked')
+  ) then
+    set local app.audience_provenance_rpc = 'true';
+    update public.campaign_audience_runs
+    set status = 'expired',
+        draft_id = null
+    where draft_id = old.id
+      and status in ('preview', 'draft_linked');
+  end if;
+  return old;
+end;
+$$;
+
+drop trigger if exists trg_campaign_drafts_expire_runs on public.campaign_drafts;
+create trigger trg_campaign_drafts_expire_runs
+  before delete on public.campaign_drafts
+  for each row execute function public.campaign_drafts_before_delete_expire_runs();
+
+-- ── 13. Retention scheduling (NOT done by this migration) ────────────────
 --
 -- The redaction/cleanup RPCs (audience_run_redact_expired,
 -- audience_interpretation_cleanup) are service-role-only and ready to call.

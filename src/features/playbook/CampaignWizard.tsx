@@ -1114,11 +1114,14 @@ export function CampaignWizard({
                         className="camp-method"
                         onClick={() => {
                           setSequenceAttempted(false);
+                          // Clear AI-derived recipients when leaving AI audience;
+                          // preserve manual/locked recipients on non-AI switches.
+                          const hadAiAudience = !!aiAudienceResult;
                           if (id === "ask-ai") {
                             setFlow("ask-ai");
                             setEditingSequence(false);
+                            if (hadAiAudience) setRecipients([]);
                             setAiAudienceResult(null);
-                            setRecipients([]);
                             setCampaign(null);
                             setAutoStart(false);
                           } else if (id === "choose") {
@@ -1127,9 +1130,8 @@ export function CampaignWizard({
                             setCustomSequence(true);
                             setAutoStart(true);
                             setEditingSequence(false);
-                            // P0: clear ALL AI audience state + AI-derived recipients
+                            if (hadAiAudience) setRecipients([]);
                             setAiAudienceResult(null);
-                            setRecipients([]);
                             setCampaign(null);
                           } else if (id === "template") {
                             setFlow("template");
@@ -1137,15 +1139,15 @@ export function CampaignWizard({
                             setAutoStart(true);
                             setEditingSequence(false);
                             setTemplateSteps(templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : []);
+                            if (hadAiAudience) setRecipients([]);
                             setAiAudienceResult(null);
-                            setRecipients([]);
                             setCampaign(null);
                           } else {
                             setFlow("ai");
                             setAutoStart(true);
                             setEditingSequence(false);
+                            if (hadAiAudience) setRecipients([]);
                             setAiAudienceResult(null);
-                            setRecipients([]);
                             setCampaign(null);
                           }
                         }}
@@ -1440,7 +1442,7 @@ export function CampaignWizard({
               )}
 
               <div className="flex justify-between pt-2">
-                <Button variant="ghost" onClick={() => { setCampaign(null); setFlow("choose"); setCustomSequence(false); setAiAudienceResult(null); setRecipients([]); }}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+                <Button variant="ghost" onClick={() => { const hadAi = !!aiAudienceResult; setCampaign(null); setFlow("choose"); setCustomSequence(false); setAiAudienceResult(null); if (hadAi) setRecipients([]); }}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
                 <button
                   type="button"
                   className="camp-btn-primary"

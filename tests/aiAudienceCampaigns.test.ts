@@ -1273,22 +1273,50 @@ describe("review 6: v_marketing_suppression is authoritative", () => {
 
 // ── Final audit: P0-1 recipient leak, P0-2 transactional discard, P1 staging-only ──
 
-describe("final audit P0-1: AI recipients cleared on method switch", () => {
-  it("every method switch handler clears recipients", () => {
+describe("final audit P0-1: AI recipients cleared, manual/locked preserved", () => {
+  it("recipient clearing is conditional on hadAiAudience, not unconditional", () => {
     const wizard = read("src/features/playbook/CampaignWizard.tsx");
-    // Count setRecipients([]) calls in method handlers (choose/template/ai/ask-ai + back button)
     const handlers = wizard.slice(
       wizard.indexOf("setSequenceAttempted(false);"),
       wizard.indexOf("</button>", wizard.indexOf("setSequenceAttempted(false);") + 300),
     );
-    const clearCalls = (handlers.match(/setRecipients\(\[\]\)/g) ?? []).length;
-    // At least 4: choose, template, ai, ask-ai handlers
-    expect(clearCalls).toBeGreaterThanOrEqual(4);
+    // Every setRecipients([]) must be guarded by hadAiAudience
+    expect(handlers).toContain("const hadAiAudience = !!aiAudienceResult");
+    expect(handlers).toContain("if (hadAiAudience) setRecipients([])");
+    // No unconditional setRecipients([]) outside the guard
+    const unguarded = handlers.replace(/if \(hadAi\w*\) setRecipients\(\[\]\)/g, "");
+    expect(unguarded).not.toContain("setRecipients([])");
   });
 
-  it("back button from AI sequence clears recipients and aiAudienceResult", () => {
+  it("AI-derived recipients are cleared on each method switch when AI audience was active", () => {
     const wizard = read("src/features/playbook/CampaignWizard.tsx");
-    expect(wizard).toContain("setCampaign(null); setFlow(\"choose\"); setCustomSequence(false); setAiAudienceResult(null); setRecipients([])");
+    const handlers = wizard.slice(
+      wizard.indexOf("const hadAiAudience"),
+      wizard.indexOf("</button>", wizard.indexOf("const hadAiAudience") + 100),
+    );
+    // Count conditional clears: one per handler (ask-ai, choose, template, ai)
+    const conditionalClears = (handlers.match(/if \(hadAiAudience\) setRecipients\(\[\]\)/g) ?? []).length;
+    expect(conditionalClears).toBe(4);
+  });
+
+  it("back button from AI sequence conditionally clears recipients", () => {
+    const wizard = read("src/features/playbook/CampaignWizard.tsx");
+    expect(wizard).toContain("const hadAi = !!aiAudienceResult");
+    expect(wizard).toContain("if (hadAi) setRecipients([])");
+  });
+
+  it("manual/locked recipients survive method switching (no unconditional clear)", () => {
+    const wizard = read("src/features/playbook/CampaignWizard.tsx");
+    // initialRecipients seeding remains in reset()
+    expect(wizard).toContain("setRecipients(initialRecipients ?? [])");
+    // In the method handlers block, every setRecipients([]) is guarded
+    const handlers = wizard.slice(
+      wizard.indexOf("const hadAiAudience"),
+      wizard.indexOf("</button>", wizard.indexOf("const hadAiAudience") + 100),
+    );
+    // Strip the guarded calls; nothing unguarded should remain
+    const stripped = handlers.replace(/if \(hadAiAudience\) setRecipients\(\[\]\)/g, "CLEARED");
+    expect(stripped).not.toContain("setRecipients([])");
   });
 
   it("doLaunch has immutable guard rejecting AI audience provenance", () => {
@@ -1507,5 +1535,137 @@ describe("immutability triggers allow FK ON DELETE SET NULL", () => {
     // No acceptance path exists for new.X is not null outside GUC.
     expect(runTrigger).not.toMatch(/new\.(user_id|campaign_id|interpretation_id|draft_id)\s+is not null.*return new/);
     expect(memberTrigger).not.toMatch(/new\.(contact_id|account_id)\s+is not null.*return new/);
+  });
+});
+
+// ── BEFORE DELETE trigger on campaign_drafts ──────────────────────────
+
+describe("campaign_drafts BEFORE DELETE trigger expires linked runs", () => {
+  const migration = read("supabase/migrations/20260822020000_campaign_audience_provenance.sql");
+
+  it("trigger function exists and is BEFORE DELETE", () => {
+    expect(migration).toContain("campaign_drafts_before_delete_expire_runs");
+    expect(migration).toContain("before delete on public.campaign_drafts");
+  });
+
+  it("sets GUC bypass before updating the run", () => {
+    const fn = migration.slice(
+      migration.indexOf("function public.campaign_drafts_before_delete_expire_runs"),
+      migration.indexOf("drop trigger if exists trg_campaign_drafts_expire_runs"),
+    );
+    expect(fn).toContain("set local app.audience_provenance_rpc = 'true'");
+  });
+
+  it("expires run and clears draft_id atomically", () => {
+    const fn = migration.slice(
+      migration.indexOf("function public.campaign_drafts_before_delete_expire_runs"),
+      migration.indexOf("drop trigger if exists trg_campaign_drafts_expire_runs"),
+    );
+    expect(fn).toContain("status = 'expired'");
+    expect(fn).toContain("draft_id = null");
+    expect(fn).toContain("where draft_id = old.id");
+  });
+
+  it("only affects preview or draft_linked runs", () => {
+    const fn = migration.slice(
+      migration.indexOf("function public.campaign_drafts_before_delete_expire_runs"),
+      migration.indexOf("drop trigger if exists trg_campaign_drafts_expire_runs"),
+    );
+    expect(fn).toContain("status in ('preview', 'draft_linked')");
+  });
+
+  it("returns OLD to allow the delete to proceed", () => {
+    const fn = migration.slice(
+      migration.indexOf("function public.campaign_drafts_before_delete_expire_runs"),
+      migration.indexOf("drop trigger if exists trg_campaign_drafts_expire_runs"),
+    );
+    expect(fn).toContain("return old");
+  });
+
+  it("non-AI drafts pass through unchanged (no linked runs)", () => {
+    const fn = migration.slice(
+      migration.indexOf("function public.campaign_drafts_before_delete_expire_runs"),
+      migration.indexOf("drop trigger if exists trg_campaign_drafts_expire_runs"),
+    );
+    // The EXISTS check means non-AI drafts skip the update entirely
+    expect(fn).toContain("if exists");
+    // Always returns old regardless
+    expect(fn).toMatch(/return old;\s*end;/);
+  });
+});
+
+// ── discard_ai_audience_draft integrity hardening ──────────────────────
+
+describe("discard_ai_audience_draft integrity", () => {
+  const migration = read("supabase/migrations/20260822020000_campaign_audience_provenance.sql");
+  const rpc = migration.slice(
+    migration.indexOf("function public.discard_ai_audience_draft"),
+    migration.indexOf("revoke all on function public.discard_ai_audience_draft"),
+  );
+
+  it("requires non-null p_run_id", () => {
+    expect(rpc).toContain("'run_id is required'");
+    expect(rpc).toMatch(/if p_run_id is null/);
+  });
+
+  it("requires non-null p_draft_id", () => {
+    expect(rpc).toContain("'draft_id is required'");
+    expect(rpc).toMatch(/if p_draft_id is null/);
+  });
+
+  it("requires non-null p_user_id", () => {
+    expect(rpc).toContain("'user_id is required'");
+    expect(rpc).toMatch(/if p_user_id is null/);
+  });
+
+  it("requires run exists (not found raises)", () => {
+    expect(rpc).toContain("'Audience run not found'");
+    expect(rpc).toContain("if not found");
+  });
+
+  it("requires run owned by caller", () => {
+    expect(rpc).toContain("'You do not own this audience run'");
+    expect(rpc).toContain("v_run_user is distinct from p_user_id");
+  });
+
+  it("requires run status is draft_linked (rejects preview)", () => {
+    expect(rpc).toContain("v_run_status != 'draft_linked'");
+    expect(rpc).toContain("Run status must be draft_linked to discard");
+  });
+
+  it("requires run.draft_id exactly equals p_draft_id (rejects mismatch)", () => {
+    expect(rpc).toContain("v_run_draft is distinct from p_draft_id");
+    expect(rpc).toContain("Run draft_id does not match");
+  });
+
+  it("requires draft exists and is owned", () => {
+    expect(rpc).toContain("'Draft not found'");
+    expect(rpc).toContain("'You do not own this draft'");
+  });
+
+  it("no conditional null fallthrough (no 'if p_run_id is not null then')", () => {
+    // The old code had optional run_id; the hardened version requires it
+    expect(rpc).not.toContain("if p_run_id is not null then");
+    expect(rpc).not.toContain("if p_draft_id is not null then");
+  });
+});
+
+describe("draft_id partial unique index", () => {
+  const migration = read("supabase/migrations/20260822020000_campaign_audience_provenance.sql");
+
+  it("partial unique index exists on campaign_audience_runs(draft_id) WHERE NOT NULL", () => {
+    expect(migration).toContain("idx_audience_runs_draft_unique");
+    expect(migration).toMatch(/create unique index if not exists idx_audience_runs_draft_unique\s+on public\.campaign_audience_runs\(draft_id\)\s+where draft_id is not null/);
+  });
+
+  it("link-audience-draft handles unique violation as 409", () => {
+    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+    const linkFn = edgeFn.slice(
+      edgeFn.indexOf("async function linkAudienceDraft"),
+      edgeFn.indexOf("async function expireAudienceRun"),
+    );
+    expect(linkFn).toContain("23505");
+    expect(linkFn).toContain("already linked to another audience run");
+    expect(linkFn).toContain("409");
   });
 });
