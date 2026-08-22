@@ -1669,3 +1669,180 @@ describe("draft_id partial unique index", () => {
     expect(linkFn).toContain("409");
   });
 });
+
+// ── Live QA P0: content contract validation ───────────────────────────
+
+describe("audience draft content contract (prompt + validation)", () => {
+  const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+  const prompts = read("supabase/functions/_shared/playbook-prompts.ts");
+  const genBlock = edgeFn.slice(
+    edgeFn.indexOf("async function generateAudienceDraft"),
+    edgeFn.indexOf("// No DB writes, no Smartlead, no enrollment"),
+  );
+
+  // ── Prompt uses approved tokens only ──
+
+  it("uses audienceDraftGenerateSystem, not campaignGenerateSystem", () => {
+    expect(genBlock).toContain("audienceDraftGenerateSystem");
+    expect(genBlock).not.toContain("campaignGenerateSystem");
+  });
+
+  it("prompt specifies only [[First name]], [[Organization]], [[Signature]] tokens", () => {
+    expect(prompts).toContain("audienceDraftGenerateSystem");
+    const promptFn = prompts.slice(
+      prompts.indexOf("function audienceDraftGenerateSystem"),
+      prompts.indexOf("/** Word-overlap"),
+    );
+    expect(promptFn).toContain("[[First name]]");
+    expect(promptFn).toContain("[[Organization]]");
+    expect(promptFn).toContain("[[Signature]]");
+    // Must NOT instruct use of Handlebars/Liquid as the intended syntax
+    // (the prompt mentions them in the FORBIDDEN section, which is correct)
+    expect(promptFn).toContain("FORBIDDEN");
+    expect(promptFn).not.toMatch(/Use.*Smartlead.*liquid syntax.*\{\{#if/i);
+  });
+
+  it("prompt forbids Handlebars and Markdown links", () => {
+    const promptFn = prompts.slice(
+      prompts.indexOf("function audienceDraftGenerateSystem"),
+      prompts.indexOf("/** Word-overlap"),
+    );
+    expect(promptFn).toContain("Handlebars");
+    expect(promptFn).toContain("Markdown links");
+    expect(promptFn).toContain("FORBIDDEN");
+  });
+
+  it("prompt has strong no-invented-claims rule", () => {
+    const promptFn = prompts.slice(
+      prompts.indexOf("function audienceDraftGenerateSystem"),
+      prompts.indexOf("/** Word-overlap"),
+    );
+    expect(promptFn).toContain("NEVER invent statistics");
+    expect(promptFn).toContain("NEVER make compliance");
+    expect(promptFn).toContain("NEVER fabricate");
+    expect(promptFn).toContain("1,000+ healthcare organizations");
+  });
+
+  // ── Validation rejects exact bad patterns ──
+
+  it("rejects Handlebars {{#if}} conditional", () => {
+    expect(genBlock).toContain("forbidden Handlebars conditional {{#if}}");
+    expect(genBlock).toContain("{{#if");
+  });
+
+  it("rejects {{else}} and {{/if}}", () => {
+    expect(genBlock).toContain("forbidden Handlebars {{else}}");
+    expect(genBlock).toContain("forbidden Handlebars {{/if}}");
+  });
+
+  it("rejects any {{...}} template variable", () => {
+    expect(genBlock).toContain("forbidden template variable {{...}}");
+  });
+
+  it("rejects {%...%} template syntax", () => {
+    expect(genBlock).toContain("forbidden template syntax {%...%}");
+  });
+
+  it("rejects %signature% Smartlead syntax", () => {
+    expect(genBlock).toContain("Smartlead %signature% syntax");
+    expect(genBlock).toContain("use [[Signature]] instead");
+  });
+
+  it("rejects unknown [[...]] tokens", () => {
+    expect(genBlock).toContain("unknown token");
+    expect(genBlock).toContain("ALLOWED_TOKENS");
+    expect(genBlock).toContain('["[[First name]]", "[[Organization]]", "[[Signature]]"]');
+  });
+
+  it("rejects Markdown [text](url) links in body", () => {
+    expect(genBlock).toContain("Markdown link syntax");
+    expect(genBlock).toContain("use <a href=");
+  });
+
+  it("rejects invented quantitative social-proof claims", () => {
+    expect(genBlock).toContain("invented quantitative claim");
+    expect(genBlock).toContain("organizations");
+    expect(genBlock).toContain("customers");
+  });
+
+  it("requires exactly one [[Signature]] at end of body", () => {
+    expect(genBlock).toContain("missing [[Signature]] at end");
+    expect(genBlock).toContain("exactly one is required");
+    expect(genBlock).toContain("content after [[Signature]]");
+  });
+
+  it("validates HTML against email-safe allowlist (p, br, a, strong, b, em, i)", () => {
+    expect(genBlock).toContain("SAFE_TAGS");
+    expect(genBlock).toContain("unsupported HTML tag");
+  });
+
+  it("rejects script/style/iframe/event-handler/javascript URL (unchanged)", () => {
+    expect(genBlock).toContain("containsUnsafeHtml");
+  });
+
+  // ── Validation accepts valid content ──
+
+  it("allows supported tokens [[First name]], [[Organization]], [[Signature]] in body", () => {
+    // The ALLOWED_TOKENS set contains all three
+    expect(genBlock).toContain('"[[First name]]"');
+    expect(genBlock).toContain('"[[Organization]]"');
+    expect(genBlock).toContain('"[[Signature]]"');
+  });
+
+  it("allows safe HTML tags: p, br, a, strong, b, em, i", () => {
+    expect(genBlock).toContain('"p", "br", "a", "strong", "b", "em", "i"');
+  });
+
+  it("delay_days validation scoped to sequence (does not reject legitimate delays)", () => {
+    // delay_days validation uses AUDIENCE_DRAFT_MAX_DELAY (90), not a content regex
+    expect(genBlock).toContain("AUDIENCE_DRAFT_MAX_DELAY");
+    // The quantitative claim regex looks for number+organizations/customers, NOT bare numbers
+    expect(genBlock).toMatch(/\\d\[\\d,\]\*\\\+\?\\s\*\(\?:healthcare/);
+  });
+
+  // ── Exact bad output adversarial cases ──
+
+  it("claim regex would match '1,000+ healthcare organizations'", () => {
+    // Verify the regex pattern works on the exact observed bad output
+    const claimRegex = /\d[\d,]*\+?\s*(?:healthcare\s+)?(?:organizations?|customers?|clients?|practices?|hospitals?|providers?)\b/i;
+    expect(claimRegex.test("We work with 1,000+ healthcare organizations")).toBe(true);
+    expect(claimRegex.test("serving 500 customers nationwide")).toBe(true);
+    expect(claimRegex.test("trusted by 2,500+ hospitals")).toBe(true);
+    // Must NOT match legitimate non-claim usage
+    expect(claimRegex.test("organizations like yours")).toBe(false);
+    expect(claimRegex.test("your healthcare organization")).toBe(false);
+    expect(claimRegex.test("Email 1 delay 3 days")).toBe(false);
+  });
+
+  it("handlebars regex would catch exact observed bad greeting", () => {
+    const body = '{{#if first_name}}Hi {{first_name}},{{else}}Hi there,{{/if}}';
+    expect(/\{\{#if\b/.test(body)).toBe(true);
+    expect(/\{\{else\}\}/.test(body)).toBe(true);
+    expect(/\{\{\/if\}\}/.test(body)).toBe(true);
+  });
+
+  it("markdown link regex catches exact observed bad pattern", () => {
+    const body = 'Check out [our SRA service](https://medcurity.com) today';
+    expect(/\[[^\]]+\]\(https?:\/\/[^)]+\)/.test(body)).toBe(true);
+  });
+
+  it("unknown token regex catches invented tokens", () => {
+    const tokens = "[[Company size]] and [[Last name]]".match(/\[\[[^\]]+\]\]/g) ?? [];
+    const allowed = new Set(["[[First name]]", "[[Organization]]", "[[Signature]]"]);
+    const unknown = tokens.filter((t) => !allowed.has(t));
+    expect(unknown).toEqual(["[[Company size]]", "[[Last name]]"]);
+  });
+
+  it("valid body with supported tokens and HTML passes all checks", () => {
+    const body = '<p>Hi [[First name]],</p><p>We help <strong>healthcare organizations</strong> like [[Organization]] with HIPAA compliance.</p><p><a href="https://medcurity.com">Learn more</a></p><p>[[Signature]]</p>';
+    // No forbidden patterns
+    expect(/\{\{/.test(body)).toBe(false);
+    expect(/%signature%/i.test(body)).toBe(false);
+    expect(/\[[^\]]+\]\(https?:\/\//.test(body)).toBe(false);
+    expect(/\d[\d,]*\+?\s*(?:healthcare\s+)?(?:organizations?|customers?)\b/i.test(body)).toBe(false);
+    // Signature present exactly once at end
+    expect((body.match(/\[\[Signature\]\]/g) ?? []).length).toBe(1);
+    const afterSig = body.slice(body.lastIndexOf("[[Signature]]") + "[[Signature]]".length).replace(/<[^>]+>/g, "").trim();
+    expect(afterSig).toBe("");
+  });
+});

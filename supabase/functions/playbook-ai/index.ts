@@ -27,6 +27,7 @@ import {
   ideasSystemPrompt,
   ideasUserPrompt,
   campaignGenerateSystem,
+  audienceDraftGenerateSystem,
   campaignSuggestSystem,
   campaignRegenerateSystem,
   campaignAnalysisSystem,
@@ -1272,7 +1273,7 @@ async function generateAudienceDraft(description: string): Promise<Record<string
   const notes = await allTrainingNotes();
   const text = await callClaude({
     model: PLAYBOOK_IDEAS_MODEL,
-    system: campaignGenerateSystem(formatTrainingNotes(notes)),
+    system: audienceDraftGenerateSystem(formatTrainingNotes(notes)),
     user: trimmed,
     maxTokens: 4000,
     temperature: 0.7,
@@ -1280,7 +1281,8 @@ async function generateAudienceDraft(description: string): Promise<Record<string
   const parsed = parseJsonResponse(text);
 
   // ── Strict output validation ──────────────────────────────────────
-  // Must produce exactly 3 emails with all required fields in safe ranges.
+  // Must produce exactly 3 emails with all required fields in safe ranges,
+  // using only approved tokens and email-safe HTML.
 
   // campaign_name / target_audience
   if (typeof parsed.campaign_name !== "string" || !parsed.campaign_name.trim()) {
@@ -1318,14 +1320,65 @@ async function generateAudienceDraft(description: string): Promise<Record<string
     if (typeof email.subject !== "string" || !email.subject.trim()) throw new AudienceActionError(`Email ${n} missing subject`, 422);
     if ((email.subject as string).length > AUDIENCE_DRAFT_MAX_SUBJECT) throw new AudienceActionError(`Email ${n} subject exceeds ${AUDIENCE_DRAFT_MAX_SUBJECT} characters`, 422);
 
-    // body_html: nonempty, bounded, no unsafe content
+    // body_html: nonempty, bounded
     if (typeof email.body_html !== "string" || !email.body_html.trim()) throw new AudienceActionError(`Email ${n} missing body`, 422);
     if ((email.body_html as string).length > AUDIENCE_DRAFT_MAX_BODY) throw new AudienceActionError(`Email ${n} body exceeds ${AUDIENCE_DRAFT_MAX_BODY} characters`, 422);
-    if (containsUnsafeHtml(email.body_html as string)) throw new AudienceActionError(`Email ${n} contains unsafe HTML (script/style/iframe/event-handler/javascript URL)`, 422);
+
+    const body = email.body_html as string;
+    const subj = email.subject as string;
+
+    // Reject unsafe HTML (script/style/iframe/event-handlers/javascript)
+    if (containsUnsafeHtml(body)) throw new AudienceActionError(`Email ${n} contains unsafe HTML (script/style/iframe/event-handler/javascript URL)`, 422);
 
     // Require visible text content (not just HTML tags)
-    const visibleText = (email.body_html as string).replace(/<[^>]+>/g, "").replace(/&\w+;/g, " ").trim();
+    const visibleText = body.replace(/<[^>]+>/g, "").replace(/&\w+;/g, " ").trim();
     if (!visibleText) throw new AudienceActionError(`Email ${n} body has no visible text content`, 422);
+
+    // ── Content contract: tokens, HTML, claims ────────────────────
+
+    // Reject Handlebars/Liquid/template syntax in body AND subject
+    const combined = body + subj;
+    if (/\{\{#if\b/.test(combined)) throw new AudienceActionError(`Email ${n} contains forbidden Handlebars conditional {{#if}}`, 422);
+    if (/\{\{else\}\}/.test(combined)) throw new AudienceActionError(`Email ${n} contains forbidden Handlebars {{else}}`, 422);
+    if (/\{\{\/if\}\}/.test(combined)) throw new AudienceActionError(`Email ${n} contains forbidden Handlebars {{/if}}`, 422);
+    if (/\{%/.test(combined)) throw new AudienceActionError(`Email ${n} contains forbidden template syntax {%...%}`, 422);
+    // Reject any {{...}} that isn't one of the approved tokens
+    if (/\{\{[^}]*\}\}/.test(combined)) throw new AudienceActionError(`Email ${n} contains forbidden template variable {{...}}`, 422);
+    // Reject %signature% (Smartlead syntax; use [[Signature]] instead)
+    if (/%signature%/i.test(combined)) throw new AudienceActionError(`Email ${n} contains Smartlead %signature% syntax; use [[Signature]] instead`, 422);
+
+    // Reject unknown [[...]] tokens — only [[First name]], [[Organization]], [[Signature]] allowed
+    const bracketTokens = combined.match(/\[\[[^\]]+\]\]/g) ?? [];
+    const ALLOWED_TOKENS = new Set(["[[First name]]", "[[Organization]]", "[[Signature]]"]);
+    for (const tok of bracketTokens) {
+      if (!ALLOWED_TOKENS.has(tok)) throw new AudienceActionError(`Email ${n} contains unknown token ${tok}`, 422);
+    }
+
+    // Reject Markdown links [text](url) in body
+    if (/\[[^\]]+\]\(https?:\/\/[^)]+\)/.test(body)) throw new AudienceActionError(`Email ${n} contains Markdown link syntax; use <a href="...">text</a> instead`, 422);
+
+    // Email-safe HTML allowlist: only p, br, a, strong, b, em, i
+    // (consistent with campaign-content.ts SAFE_AUTHORING_TAGS)
+    const SAFE_TAGS = new Set(["p", "br", "a", "strong", "b", "em", "i"]);
+    const htmlTags = body.matchAll(/<\/?\s*([a-z0-9-]+)\b[^>]*>/gi);
+    for (const match of htmlTags) {
+      const tag = match[1].toLowerCase();
+      if (!SAFE_TAGS.has(tag)) throw new AudienceActionError(`Email ${n} contains unsupported HTML tag <${tag}>`, 422);
+    }
+
+    // Require exactly one [[Signature]] at the end of body
+    const sigCount = (body.match(/\[\[Signature\]\]/g) ?? []).length;
+    if (sigCount === 0) throw new AudienceActionError(`Email ${n} is missing [[Signature]] at end`, 422);
+    if (sigCount > 1) throw new AudienceActionError(`Email ${n} has ${sigCount} [[Signature]] tokens; exactly one is required`, 422);
+    // Signature must be at the end (last meaningful content)
+    const afterSig = body.slice(body.lastIndexOf("[[Signature]]") + "[[Signature]]".length);
+    const afterSigText = afterSig.replace(/<[^>]+>/g, "").trim();
+    if (afterSigText) throw new AudienceActionError(`Email ${n} has content after [[Signature]]; signature must be the last element`, 422);
+
+    // Reject invented quantitative social-proof claims in body and subject
+    if (/\d[\d,]*\+?\s*(?:healthcare\s+)?(?:organizations?|customers?|clients?|practices?|hospitals?|providers?)\b/i.test(combined)) {
+      throw new AudienceActionError(`Email ${n} contains an invented quantitative claim (e.g. "1,000+ organizations"); remove specific numbers not in training notes`, 422);
+    }
   }
 
   // No DB writes, no Smartlead, no enrollment — pure generation only.
