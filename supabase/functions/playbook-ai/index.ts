@@ -1,14 +1,22 @@
 // playbook-ai Edge Function — the Playbook "brain" (ported from Nexus).
 // Actions:
 //   - generate-ideas  : weekly AI marketing ideas (server.js generatePlaybookIdeas)
-// Campaign-writer + analysis + adaptation actions land in later phases.
+//   - generate-campaign: AI writes a full email sequence from a description
+//   - suggest-campaign : improvements to a draft, grounded in history
+//   - regenerate-email : rewrite one email in a sequence
+//   - analyze-campaign : analyze completed campaign vs historical averages
+//   - campaign-insights: template suggestions + performance summary
+//   - interpret-audience: AI translates plain-English brief -> strict AudienceSpec v1
+//   - resolve-audience : deterministic CRM query from validated spec -> provenance
 //
 // Campaigns unification (2026-07-22): campaign context/analysis reads and
 // writes `campaigns`, not the retired `playbook_campaigns` (now
 // playbook_campaigns_archived_20260722 — see 20260722100000_campaigns_unify.sql).
 //
-// Auth: admin/super_admin only (verified from the caller's JWT). Writes
-// run via the service client (tables are admin-only RLS).
+// Auth: per-action allowlist (2026-08-22). REP_ELIGIBLE_AI_ACTIONS are open
+// to all authenticated users (matching company-wide campaign launch intent).
+// Ideas/Insights/Training remain admin-only. Service-role callers (cron)
+// bypass all gates.
 //
 // Deploy: supabase functions deploy playbook-ai
 
@@ -23,6 +31,7 @@ import {
   campaignRegenerateSystem,
   campaignAnalysisSystem,
   campaignInsightsSystem,
+  audienceInterpretSystem,
   isTrainingNoteDuplicate,
   formatTrainingNotes,
   parseJsonResponse,
@@ -30,6 +39,22 @@ import {
   getMonday,
   type PlaybookContext,
 } from "../_shared/playbook-prompts.ts";
+import {
+  type AudienceSpecV1,
+  INDUSTRY_CATEGORY_VALUES,
+  PROJECT_SEGMENT_VALUES,
+  US_STATE_CODES,
+  MAX_RESULTS_HARD_CAP,
+  MAX_RESULTS_DEFAULT,
+  BRIEF_MAX_LENGTH,
+  validateAudienceSpec,
+  isUnfilteredSpec,
+  isPlausibleEmail,
+  specHash,
+  normalizeEmail,
+  detectPiiPatterns,
+  piiRejectionMessage,
+} from "../_shared/audience-spec.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -60,6 +85,29 @@ async function callerIsAdmin(authHeader: string | null): Promise<boolean> {
   const { data, error } = await asUser.rpc("is_admin");
   if (error) return false;
   return data === true;
+}
+
+/** Extract the caller's user ID from their JWT. Null for service-role/no-JWT. */
+async function callerUserId(authHeader: string | null): Promise<string | null> {
+  if (!authHeader) return null;
+  try {
+    const asUser = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false },
+    });
+    const { data } = await asUser.auth.getUser();
+    return data?.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Create a Supabase client scoped to the caller's JWT (for RLS-visible queries). */
+function callerClient(authHeader: string) {
+  return createClient(SUPABASE_URL, ANON_KEY, {
+    global: { headers: { Authorization: authHeader } },
+    auth: { persistSession: false },
+  });
 }
 
 /**
@@ -575,15 +623,564 @@ ${formatTrainingNotes(notes)}`;
   return { success: true, analysis, suggestions_created: suggestionsCreated, training_added: trainingAdded };
 }
 
+// ── AI Audience: interpret-audience ──────────────────────────────────────
+
+/**
+ * Translate a plain-English audience brief into a strict AudienceSpec v1.
+ * The model receives ONLY the brief + allowlisted vocabulary — never CRM
+ * rows, contact PII, or IDs.
+ *
+ * Blocker 2: stores a server-persisted interpretation record via RPC and
+ * returns interpretation_id.  resolve-audience must bind this record for
+ * AI provenance — the client cannot forge model/spec/hash.
+ *
+ * Blocker 3: rejects briefs containing obvious PII (emails, phone
+ * numbers, SSNs) with plain guidance before sending to the model.
+ */
+async function interpretAudience(brief: string, userId: string): Promise<Record<string, unknown>> {
+  if (!brief || typeof brief !== "string") {
+    throw new Error("brief is required");
+  }
+  const trimmed = brief.trim();
+  if (trimmed.length < 10) throw new Error("Brief must be at least 10 characters");
+  if (trimmed.length > BRIEF_MAX_LENGTH) throw new Error(`Brief exceeds ${BRIEF_MAX_LENGTH} characters`);
+
+  // Blocker 3: PII guard — reject before sending to AI or storing
+  const piiFound = detectPiiPatterns(trimmed);
+  if (piiFound.length > 0) {
+    throw new Error(piiRejectionMessage(piiFound));
+  }
+
+  // Build the vocabulary context — the ONLY CRM data the model sees
+  const vocabulary = {
+    industry_categories: INDUSTRY_CATEGORY_VALUES,
+    project_segments: PROJECT_SEGMENT_VALUES,
+    us_state_codes: US_STATE_CODES,
+  };
+
+  const modelId = PLAYBOOK_IDEAS_MODEL;
+  const text = await callClaude({
+    model: modelId,
+    system: audienceInterpretSystem(vocabulary),
+    user: trimmed,
+    maxTokens: 1500,
+    temperature: 0.2,
+  });
+
+  const parsed = parseJsonResponse(text);
+
+  // Deterministically set locked fields (invariants, not cleanup)
+  parsed.version = 1;
+  parsed.exclude_customers = true;
+  parsed.exclude_former_customers = true;
+  parsed.exclude_partners = true;
+  parsed.exclude_suppressed = true;
+  parsed.exclude_active_enrollments = true;
+  if (typeof parsed.max_results !== "number" || parsed.max_results < 1) {
+    parsed.max_results = MAX_RESULTS_DEFAULT;
+  }
+  if ((parsed.max_results as number) > MAX_RESULTS_HARD_CAP) {
+    parsed.max_results = MAX_RESULTS_HARD_CAP;
+  }
+  if (!parsed.filters || typeof parsed.filters !== "object") {
+    parsed.filters = {};
+  }
+
+  // Validate — reject on ANY invalid/injection-shaped output, never clean up
+  const errors = validateAudienceSpec(parsed);
+  if (errors.length > 0) {
+    throw new Error(
+      `Invalid model output: ${errors.map((e) => `${e.field}: ${e.message}`).join("; ")}`,
+    );
+  }
+
+  const spec = parsed as unknown as AudienceSpecV1;
+  const hash = await specHash(spec);
+
+  // Blocker 2: persist interpretation server-side via RPC (service_role)
+  const { data: interpId, error: interpErr } = await svc.rpc(
+    "create_audience_interpretation",
+    {
+      p_user_id: userId,
+      p_brief: trimmed,
+      p_spec: spec,
+      p_spec_hash: hash,
+      p_model_id: modelId,
+    },
+  );
+  if (interpErr) {
+    throw new Error("Failed to persist interpretation: " + interpErr.message);
+  }
+
+  return {
+    success: true,
+    interpretation_id: interpId,
+    spec,
+    spec_hash: hash,
+    model_id: modelId,
+  };
+}
+
+// ── AI Audience: resolve-audience ───────────────────────────────────────
+
+/** Scan hard cap — never process more contacts than this per run. */
+const SCAN_HARD_CAP = 10000;
+
+/**
+ * Deterministic audience resolution from a validated AudienceSpec v1.
+ *
+ * Blocker 2: AI path requires interpretation_id (loaded + bound in SQL RPC).
+ *   Manual path forces model_id='manual', raw_prompt=NULL.  Never accepts
+ *   client model metadata or stores caller prompt on resolve.
+ * Blocker 4: enrollment matching uses check_active_enrollments_normalized
+ *   RPC (lower(trim()) + functional index), not case-sensitive .in().
+ * Blocker 5: true keyset pagination via .gt("id", lastId) + .limit(),
+ *   with a truthful truncation probe at SCAN_HARD_CAP (10,000).
+ *
+ * Never calls AI.  Never calls Smartlead.  Never launches/sends.
+ */
+async function resolveAudience(
+  clientSpec: AudienceSpecV1 | null,
+  userId: string,
+  authHeader: string,
+  confirmUnfiltered: boolean,
+  interpretationId: string | null,
+): Promise<Record<string, unknown>> {
+  // ── Determine spec source: interpretation (AI) or client (manual) ──
+  let spec: AudienceSpecV1;
+  let hash: string;
+
+  if (interpretationId) {
+    // AI path: load interpretation from DB (read-only, for spec access).
+    // The binding + consumption happens atomically in the SQL RPC below.
+    const { data: interp, error: interpErr } = await svc
+      .from("campaign_audience_interpretations")
+      .select("user_id, spec, spec_hash, model_id, brief, expires_at, consumed_at")
+      .eq("id", interpretationId)
+      .single();
+    if (interpErr || !interp) throw new Error("Interpretation not found");
+    if (interp.user_id !== userId) throw new Error("Interpretation belongs to a different user");
+    if (interp.consumed_at) throw new Error("Interpretation already consumed");
+    if (new Date(interp.expires_at as string) < new Date()) throw new Error("Interpretation has expired");
+
+    spec = interp.spec as AudienceSpecV1;
+    hash = interp.spec_hash as string;
+  } else {
+    // Manual path: spec from client, model_id forced to 'manual'
+    if (!clientSpec) throw new Error("spec is required for manual resolution");
+    spec = clientSpec;
+    hash = await specHash(spec);
+  }
+
+  // 1. Validate spec server-side
+  const specErrors = validateAudienceSpec(spec);
+  if (specErrors.length > 0) {
+    throw new Error(`Invalid spec: ${specErrors.map((e) => e.message).join("; ")}`);
+  }
+  if (isUnfilteredSpec(spec) && !confirmUnfiltered) {
+    throw new Error("Spec has no active filters and would match all contacts. Pass confirm_unfiltered: true to proceed.");
+  }
+
+  const userDb = callerClient(authHeader);
+  const filters = spec.filters;
+
+  // 2. Fetch partner account IDs via authoritative v_partner_accounts view
+  const partnerAccountIds = new Set<string>();
+  {
+    let partnerLastId = "00000000-0000-0000-0000-000000000000";
+    const PAGE = 1000;
+    for (;;) {
+      const { data, error } = await svc
+        .from("v_partner_accounts")
+        .select("id")
+        .gt("id", partnerLastId)
+        .order("id", { ascending: true })
+        .limit(PAGE);
+      if (error) throw new Error("Partner account query failed: " + error.message);
+      for (const row of (data ?? []) as { id: string }[]) {
+        partnerAccountIds.add(row.id);
+        partnerLastId = row.id;
+      }
+      if (!data || data.length < PAGE) break;
+    }
+  }
+
+  // 3. Query contacts + accounts via caller-JWT (RLS-scoped).
+  //    NO server-side .in() for targeting filters — NULLs must surface as
+  //    ambiguous, not be silently excluded by PostgREST.
+  //    Blocker 5: true keyset pagination via .gt("id", lastId) + .limit().
+  const stateSet = filters.state_values && filters.state_values.length > 0
+    ? new Set(filters.state_values.map((s) => s.toUpperCase()))
+    : null;
+  const icSet = filters.industry_category_values && filters.industry_category_values.length > 0
+    ? new Set<string>(filters.industry_category_values)
+    : null;
+  const psSet = filters.project_segment_values && filters.project_segment_values.length > 0
+    ? new Set<string>(filters.project_segment_values)
+    : null;
+
+  type RawContact = {
+    id: string;
+    first_name: string | null;
+    last_name: string | null;
+    email: string | null;
+    email2: string | null;
+    email3: string | null;
+    account_id: string;
+    archived_at: string | null;
+    do_not_contact: boolean | null;
+    no_longer_employed: boolean | null;
+    mailing_state: string | null;
+    accounts: {
+      id: string;
+      name: string | null;
+      industry_category: string | null;
+      project_segment: string | null;
+      industry: string | null;
+      billing_state: string | null;
+      shipping_state: string | null;
+      account_type: string | null;
+      customer_status: string | null;
+      do_not_contact: boolean | null;
+      archived_at: string | null;
+    };
+  };
+
+  interface MemberRow {
+    contact_id: string;
+    account_id: string;
+    email_normalized: string;
+    disposition: string;
+    reason_codes: string[];
+    snapshot_industry_category: string | null;
+    snapshot_project_segment: string | null;
+    snapshot_state: string | null;
+    snapshot_customer_status: string | null;
+    snapshot_account_type: string | null;
+    snapshot_account_name: string | null;
+  }
+
+  const members: MemberRow[] = [];
+  const seenEmails = new Map<string, number>();
+  let totalScanned = 0;
+  let scanTruncated = false;
+  let totalDuplicateContacts = 0;
+
+  // Keyset pagination: track the last processed contact ID
+  let lastContactId = "00000000-0000-0000-0000-000000000000";
+  const CONTACT_PAGE = 1000;
+
+  while (totalScanned < SCAN_HARD_CAP) {
+    const query = userDb
+      .from("contacts")
+      .select(`
+        id, first_name, last_name, email, email2, email3,
+        account_id, archived_at, do_not_contact, no_longer_employed,
+        mailing_state,
+        accounts!inner (
+          id, name, industry_category, project_segment, industry,
+          billing_state, shipping_state, account_type, customer_status,
+          do_not_contact, archived_at
+        )
+      `)
+      .is("archived_at", null)
+      .not("email", "is", null)
+      .neq("email", "")
+      .is("accounts.archived_at", null)
+      .gt("id", lastContactId)
+      .order("id", { ascending: true })
+      .limit(CONTACT_PAGE);
+
+    const { data: pageData, error: pageErr } = await query;
+    if (pageErr) throw new Error(`Contact query failed: ${pageErr.message}`);
+    const contacts = (pageData ?? []) as unknown as RawContact[];
+    if (contacts.length === 0) break;
+
+    for (const c of contacts) {
+      totalScanned++;
+      lastContactId = c.id;
+
+      const a = c.accounts;
+      const primaryEmail = normalizeEmail(c.email);
+      if (!primaryEmail || !isPlausibleEmail(primaryEmail)) continue;
+
+      // Client-side targeting filter: match / ambiguous / nonmatch
+      let isNonmatch = false;
+
+      if (icSet) {
+        if (a.industry_category && !icSet.has(a.industry_category)) {
+          isNonmatch = true;
+        }
+      }
+      if (psSet && !isNonmatch) {
+        if (a.project_segment && !psSet.has(a.project_segment)) {
+          isNonmatch = true;
+        }
+      }
+      if (stateSet && !isNonmatch) {
+        const hasBilling = !!a.billing_state;
+        const hasMailing = !!c.mailing_state;
+        const billingMatch = hasBilling && stateSet.has(a.billing_state!.toUpperCase());
+        const mailingMatch = hasMailing && stateSet.has(c.mailing_state!.toUpperCase());
+        if ((hasBilling || hasMailing) && !billingMatch && !mailingMatch) {
+          isNonmatch = true;
+        }
+      }
+
+      if (isNonmatch) continue;
+
+      const reasons: string[] = [];
+
+      let isAmbiguous = false;
+      if (icSet && !a.industry_category) {
+        reasons.push("no_industry_category_set");
+        isAmbiguous = true;
+      }
+      if (psSet && !a.project_segment) {
+        reasons.push("no_project_segment_set");
+        isAmbiguous = true;
+      }
+      if (stateSet && !a.billing_state && !c.mailing_state) {
+        reasons.push("no_state_set");
+        isAmbiguous = true;
+      }
+
+      if (a.customer_status === "client") reasons.push("customer_account");
+      if (a.customer_status === "former_client") reasons.push("former_customer_account");
+      if (partnerAccountIds.has(a.id)) reasons.push("partner_account");
+      if (c.do_not_contact) reasons.push("contact_do_not_contact");
+      if (a.do_not_contact) reasons.push("account_do_not_contact");
+      if (c.no_longer_employed) reasons.push("contact_no_longer_employed");
+
+      const existingIdx = seenEmails.get(primaryEmail);
+      if (existingIdx !== undefined) {
+        totalDuplicateContacts++;
+        const canonical = members[existingIdx];
+        canonical.reason_codes.push(`duplicate_contact:${c.id}:${a.id}`);
+        continue;
+      }
+
+      const hasExclusions = reasons.some((r) =>
+        r === "customer_account" || r === "former_customer_account" ||
+        r === "partner_account" || r === "contact_do_not_contact" ||
+        r === "account_do_not_contact" || r === "contact_no_longer_employed"
+      );
+      const disposition = isAmbiguous ? "ambiguous" : hasExclusions ? "excluded" : "eligible";
+
+      seenEmails.set(primaryEmail, members.length);
+      members.push({
+        contact_id: c.id,
+        account_id: a.id,
+        email_normalized: primaryEmail,
+        disposition,
+        reason_codes: reasons,
+        snapshot_industry_category: a.industry_category,
+        snapshot_project_segment: a.project_segment,
+        snapshot_state: a.billing_state ?? c.mailing_state,
+        snapshot_customer_status: a.customer_status,
+        snapshot_account_type: a.account_type,
+        snapshot_account_name: a.name,
+      });
+    }
+
+    if (contacts.length < CONTACT_PAGE) break;
+    if (totalScanned >= SCAN_HARD_CAP) {
+      // Truthful truncation probe: the cap-th contact was processed above;
+      // now check whether more contacts exist beyond it.
+      const { data: probe } = await userDb
+        .from("contacts")
+        .select("id")
+        .gt("id", lastContactId)
+        .is("archived_at", null)
+        .not("email", "is", null)
+        .neq("email", "")
+        .limit(1);
+      scanTruncated = (probe?.length ?? 0) > 0;
+      break;
+    }
+  }
+
+  // 4. Service-role checks: suppression + active enrollments
+  const eligibleEmails = members
+    .filter((m) => m.disposition === "eligible")
+    .map((m) => m.email_normalized);
+
+  // Suppression check (batched + paginated)
+  const suppressionMap = new Map<string, string[]>();
+  if (eligibleEmails.length > 0) {
+    const BATCH = 500;
+    const PAGE = 1000;
+    for (let i = 0; i < eligibleEmails.length; i += BATCH) {
+      const batch = eligibleEmails.slice(i, i + BATCH);
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await svc
+          .from("v_marketing_suppression")
+          .select("email, reason")
+          .in("email", batch)
+          .order("email", { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) throw new Error("Suppression check failed: " + error.message);
+        const rows = (data ?? []) as { email: string; reason: string }[];
+        for (const row of rows) {
+          const norm = normalizeEmail(row.email);
+          const existing = suppressionMap.get(norm);
+          if (existing) {
+            if (!existing.includes(row.reason)) existing.push(row.reason);
+          } else {
+            suppressionMap.set(norm, [row.reason]);
+          }
+        }
+        if (rows.length < PAGE) break;
+      }
+    }
+  }
+
+  // Blocker 4: case-insensitive enrollment matching via normalized RPC
+  // (uses lower(trim()) + functional index, not raw .in())
+  const activeEnrollmentEmails = new Set<string>();
+  if (eligibleEmails.length > 0) {
+    const BATCH = 500;
+    for (let i = 0; i < eligibleEmails.length; i += BATCH) {
+      const batch = eligibleEmails.slice(i, i + BATCH);
+      const { data, error } = await svc.rpc(
+        "check_active_enrollments_normalized",
+        { p_emails: batch },
+      );
+      if (error) throw new Error("Enrollment check failed: " + error.message);
+      const matched = (data ?? []) as string[];
+      for (const email of matched) {
+        activeEnrollmentEmails.add(email);
+      }
+    }
+  }
+
+  // Apply suppression + enrollment to eligible members
+  for (const m of members) {
+    if (m.disposition !== "eligible") continue;
+    const suppReasons = suppressionMap.get(m.email_normalized);
+    if (suppReasons?.length) {
+      m.disposition = "excluded";
+      m.reason_codes.push(...suppReasons);
+      continue;
+    }
+    if (activeEnrollmentEmails.has(m.email_normalized)) {
+      m.disposition = "active_enrollment";
+      m.reason_codes.push("active_enrollment_elsewhere");
+    }
+  }
+
+  // 5. Apply max_results cap
+  const eligible = members.filter((m) => m.disposition === "eligible");
+  if (eligible.length > spec.max_results) {
+    for (let i = spec.max_results; i < eligible.length; i++) {
+      eligible[i].disposition = "excluded";
+      eligible[i].reason_codes.push("over_max_results_cap");
+    }
+  }
+
+  // 6. Summary counts
+  const counts = {
+    total_scanned: totalScanned,
+    scan_truncated: scanTruncated,
+    total_matched: members.length,
+    total_eligible: members.filter((m) => m.disposition === "eligible").length,
+    total_excluded: members.filter((m) => m.disposition === "excluded").length,
+    total_ambiguous: members.filter((m) => m.disposition === "ambiguous").length,
+    total_duplicate: totalDuplicateContacts,
+    total_active_enrollment: members.filter((m) => m.disposition === "active_enrollment").length,
+  };
+
+  // 7. Persist provenance via transactional RPC.
+  //    Blocker 2: interpretation_id binds server-owned spec/hash/model/prompt
+  //    atomically.  Manual path: model_id='manual', raw_prompt=NULL (forced in SQL).
+  const runPayload = {
+    user_id: userId,
+    spec: spec,
+    spec_hash: hash,
+    total_matched: counts.total_matched,
+    total_eligible: counts.total_eligible,
+    total_excluded: counts.total_excluded,
+    total_ambiguous: counts.total_ambiguous,
+    total_duplicate: counts.total_duplicate,
+    total_active_enrollment: counts.total_active_enrollment,
+  };
+  const memberPayload = members.map((m) => ({
+    contact_id: m.contact_id,
+    account_id: m.account_id,
+    email_normalized: m.email_normalized,
+    disposition: m.disposition,
+    reason_codes: m.reason_codes,
+    snapshot_industry_category: m.snapshot_industry_category,
+    snapshot_project_segment: m.snapshot_project_segment,
+    snapshot_state: m.snapshot_state,
+    snapshot_customer_status: m.snapshot_customer_status,
+    snapshot_account_type: m.snapshot_account_type,
+    snapshot_account_name: m.snapshot_account_name,
+  }));
+  const { data: runId, error: rpcErr } = await svc.rpc(
+    "create_audience_run_with_members",
+    {
+      p_run: runPayload,
+      p_members: memberPayload,
+      p_interpretation_id: interpretationId,
+    },
+  );
+  if (rpcErr) throw new Error("Failed to persist audience provenance: " + rpcErr.message);
+
+  // 8. Response
+  const preview = (m: MemberRow) => ({
+    contact_id: m.contact_id,
+    account_id: m.account_id,
+    email: m.email_normalized,
+    disposition: m.disposition,
+    reason_codes: m.reason_codes,
+    account_name: m.snapshot_account_name,
+    industry_category: m.snapshot_industry_category,
+    state: m.snapshot_state,
+  });
+
+  return {
+    success: true,
+    run_id: runId,
+    interpretation_id: interpretationId,
+    spec_hash: hash,
+    counts,
+    eligible: members.filter((m) => m.disposition === "eligible").slice(0, spec.max_results).map(preview),
+    excluded: members.filter((m) => m.disposition === "excluded").map(preview),
+    ambiguous: members.filter((m) => m.disposition === "ambiguous").map(preview),
+    active_enrollments: members.filter((m) => m.disposition === "active_enrollment").map(preview),
+  };
+}
+
+// ── HTTP handler ─────────────────────────────────────────────────────────
+
+/** Actions open to all authenticated users for AI audience features only.
+ *  All other actions (ideas/insights/training/analyze) stay admin-only. */
+const REP_ELIGIBLE_AI_ACTIONS = new Set([
+  "interpret-audience",
+  "resolve-audience",
+]);
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const auth = req.headers.get("Authorization");
-    if (!isServiceRole(auth) && !(await callerIsAdmin(auth))) {
-      return json({ error: "Admin only" }, 403);
-    }
     const body = await req.json().catch(() => ({}));
     const action = body.action ?? "generate-ideas";
+    const svcCaller = isServiceRole(auth);
+
+    // Per-action auth: audience actions open to all authenticated,
+    // everything else stays admin/service-role only.
+    if (REP_ELIGIBLE_AI_ACTIONS.has(action)) {
+      if (!svcCaller) {
+        const uid = await callerUserId(auth);
+        if (!uid) return json({ error: "Sign in required" }, 401);
+      }
+    } else {
+      if (!svcCaller && !(await callerIsAdmin(auth))) {
+        return json({ error: "Admin only" }, 403);
+      }
+    }
 
     if (action === "generate-ideas") {
       const result = await generateIdeas(!!body.force);
@@ -604,6 +1201,35 @@ Deno.serve(async (req) => {
     if (action === "campaign-insights") {
       return json(await campaignInsights(body.campaign_id));
     }
+
+    // ── AI Audience actions ────────────────────────────────────────────
+    if (action === "interpret-audience") {
+      const uid = await callerUserId(auth);
+      if (!uid) return json({ error: "Sign in required" }, 401);
+      return json(await interpretAudience(body.brief ?? "", uid));
+    }
+    if (action === "resolve-audience") {
+      const uid = await callerUserId(auth);
+      if (!uid) return json({ error: "Sign in required" }, 401);
+      if (!auth) return json({ error: "Sign in required" }, 401);
+      const confirmUnfiltered = body.confirm_unfiltered === true;
+      // Blocker 2: AI path provides interpretation_id (server-persisted);
+      // manual path provides raw spec.  Never accept client model metadata
+      // or store caller prompt on resolve.
+      const interpId = typeof body.interpretation_id === "string" ? body.interpretation_id : null;
+      const clientSpec = interpId ? null : (body.spec as AudienceSpecV1 | null);
+      if (!interpId && !clientSpec) {
+        return json({ error: "Either interpretation_id (AI path) or spec (manual path) is required" }, 400);
+      }
+      return json(await resolveAudience(
+        clientSpec,
+        uid,
+        auth,
+        confirmUnfiltered,
+        interpId,
+      ));
+    }
+
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {
     return json({ error: (e as Error).message }, 500);

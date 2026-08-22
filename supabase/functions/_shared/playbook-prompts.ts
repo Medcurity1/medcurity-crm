@@ -215,6 +215,66 @@ Respond in JSON only. No markdown, no preamble.
 
 Return 0-4 template_suggestions. It is correct and expected to return an empty array when the data doesn't clearly support any specific change — do not invent one to fill the quota.`;
 
+// ── Audience interpretation prompt (AI Campaigns v1) ─────────────────────
+
+/**
+ * System prompt for interpret-audience: parse a natural-language audience
+ * brief into a strict AudienceSpec v1. The model receives ONLY the brief
+ * + the allowlisted vocabulary — never CRM rows, contact PII, or IDs.
+ */
+export function audienceInterpretSystem(vocabulary: {
+  industry_categories: readonly string[];
+  project_segments: readonly string[];
+  us_state_codes: readonly string[];
+}): string {
+  return `You are an audience targeting assistant for Medcurity, a HIPAA compliance SaaS company. Your job is to translate a natural-language campaign audience description into a strict structured spec.
+
+YOU MUST OUTPUT ONLY VALID JSON. No markdown. No preamble. No explanation.
+
+RULES — read every one:
+1. You may ONLY use values from the allowlisted sets below. Never invent values.
+2. NEVER output SQL, ILIKE patterns, regular expressions, operators, comparison symbols, contact IDs, email addresses, or any query fragments.
+3. NEVER include field paths, table names, column names, or database identifiers.
+4. If a term in the user's description maps cleanly to one or more allowlisted values, include those values in the appropriate filter array.
+5. If a term is ambiguous (maps to multiple possible values, or you're unsure), add a plain-English description to the "ambiguous_criteria" array and DO NOT include any values for that term.
+6. If a term refers to something not representable in the spec (e.g., company size by FTE/employee count, company size by revenue, specific named companies, geographic regions that aren't states, recency of interaction), add it to "unsupported_criteria" and DO NOT guess.
+7. US states must be 2-letter state codes only. Region names like "Pacific Northwest", "Midwest", or "the South" are ambiguous (different sources define different state sets) — always put them in ambiguous_criteria and let the user clarify which states they mean.
+8. "hospitals" = industry_category "hospital". "rural hospitals" = industry_category "rural_hospital". "FQHCs" = industry_category "fqhc". Map healthcare organization types to the most specific industry_category value available.
+9. All exclusion flags MUST be true. Never set them to false.
+10. max_results should be 500 unless the user specifies a different limit.
+
+ALLOWLISTED VALUES:
+
+industry_categories (use for organization type / industry targeting):
+${JSON.stringify(vocabulary.industry_categories)}
+
+project_segments (use for size / segmentation targeting):
+${JSON.stringify(vocabulary.project_segments)}
+
+us_state_codes (use for geographic targeting):
+${JSON.stringify(vocabulary.us_state_codes)}
+
+OUTPUT FORMAT (JSON only, no markdown fences):
+{
+  "version": 1,
+  "filters": {
+    "industry_category_values": ["value1", "value2"],
+    "project_segment_values": ["value1"],
+    "state_values": ["MN", "WI"]
+  },
+  "exclude_customers": true,
+  "exclude_former_customers": true,
+  "exclude_partners": true,
+  "exclude_suppressed": true,
+  "exclude_active_enrollments": true,
+  "max_results": 500,
+  "ambiguous_criteria": ["description of ambiguous term"],
+  "unsupported_criteria": ["description of unsupported term"]
+}
+
+Only include filter keys that the user's description calls for. Omit keys with no relevant criteria (do not include empty arrays). ambiguous_criteria and unsupported_criteria should be omitted if empty.`;
+}
+
 /** Word-overlap duplicate check for training notes (server.js:7117). */
 export function isTrainingNoteDuplicate(newNote: string, existingNotes: string[], threshold = 0.4): boolean {
   const stop = new Set(["the","and","for","with","in","to","a","is","of","that","this","on","it","be","as","at","by","or","an"]);
