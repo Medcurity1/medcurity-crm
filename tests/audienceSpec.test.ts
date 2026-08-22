@@ -685,7 +685,7 @@ describe("Prompt privacy — no CRM rows, no contradictions", () => {
 describe("interpretAudience — reject, never clean up", () => {
   const edgeFn = read("supabase", "functions", "playbook-ai", "index.ts");
   const fn = edgeFn.slice(edgeFn.indexOf("async function interpretAudience"), edgeFn.indexOf("// ── AI Audience: resolve-audience"));
-  it("throws on validation errors", () => { expect(fn).toContain("Invalid model output"); expect(fn).not.toContain(".filter((v) =>"); });
+  it("throws fixed non-reflective error on validation failures (D2)", () => { expect(fn).toContain("AI interpretation produced invalid output"); expect(fn).not.toContain("errors.map"); });
   it("no inline containsSqlFragment", () => { expect(fn).not.toContain("containsSqlFragment"); });
 });
 

@@ -480,11 +480,30 @@ export interface Recipient {
   account_id?: string;
 }
 
+// D7: bounded client timeout (120s) on AI invoke calls. The server has
+// a 90s callClaude timeout; this catches network stalls and provider
+// hangs that would otherwise leave the UI in a loading state.
+const AI_INVOKE_TIMEOUT_MS = 120_000;
+
 async function invokeAI<T>(body: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke("playbook-ai", { body });
-  if (error) throw error;
-  if (data?.error) throw new Error(data.error);
-  return data as T;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AI_INVOKE_TIMEOUT_MS);
+  try {
+    const { data, error } = await supabase.functions.invoke("playbook-ai", {
+      body,
+      signal: controller.signal,
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    return data as T;
+  } catch (e) {
+    if ((e as Error).name === "AbortError") {
+      throw new Error("Request timed out. Please try again.");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function useGenerateCampaign() {

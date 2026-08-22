@@ -1145,3 +1145,176 @@ describe("provider/parse errors mapped to fixed retryable message", () => {
     expect(afterCatch).toContain("invalid message selection");
   });
 });
+
+// ── D1: secondary email suppression safety ────────────────────────────
+
+describe("D1: secondary email suppression in resolveAudience", () => {
+  const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+
+  it("tracks email2/email3 in secondaryEmailToMembers map", () => {
+    expect(edgeFn).toContain("secondaryEmailToMembers");
+    expect(edgeFn).toContain("c.email2, c.email3");
+  });
+
+  it("includes secondary emails in the suppression batch", () => {
+    expect(edgeFn).toContain("...secondaryEmailToMembers.keys()");
+  });
+
+  it("propagates secondary suppression hits to canonical member before final disposition", () => {
+    expect(edgeFn).toContain("secondary_email_suppressed");
+    expect(edgeFn).toContain("for (const [secEmail, memberIndices] of secondaryEmailToMembers)");
+  });
+
+  it("secondary suppression makes canonical member excluded via isSuppressed", () => {
+    expect(edgeFn).toContain('m.reason_codes.includes("secondary_email_suppressed")');
+  });
+
+  it("canonical member still uses primary email for enrollment (not secondary)", () => {
+    // members.push uses primaryEmail, not email2/email3
+    const pushBlock = edgeFn.slice(
+      edgeFn.indexOf("seenEmails.set(primaryEmail, memberIdx)"),
+      edgeFn.indexOf("// D1: register secondary emails"),
+    );
+    expect(pushBlock).toContain("email_normalized: primaryEmail");
+  });
+});
+
+// ── D2: non-reflective interpretation errors ──────────────────────────
+
+describe("D2: interpretation errors do not reflect model values", () => {
+  const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+
+  it("interpretation validation uses fixed error message", () => {
+    expect(edgeFn).toContain("AI interpretation produced invalid output. Please rephrase your description.");
+  });
+
+  it("does not interpolate validateAudienceSpec error details into response", () => {
+    const interpretFn = edgeFn.slice(
+      edgeFn.indexOf("async function interpretAudience"),
+      edgeFn.indexOf("async function resolveAudience"),
+    );
+    // The old pattern was: errors.map(e => e.field + ": " + e.message).join("; ")
+    expect(interpretFn).not.toContain("errors.map");
+    expect(interpretFn).not.toContain("e.field");
+    expect(interpretFn).not.toContain("e.message");
+  });
+});
+
+// ── D3: Unicode invisible/bidi control chars ──────────────────────────
+
+describe("D3: validateSafeLabel rejects Unicode invisible/bidi characters", () => {
+  it("rejects zero-width space U+200B", () => {
+    expect(validateSafeLabel("test\u200Bname", "f")).toContain("control characters");
+  });
+  it("rejects zero-width non-joiner U+200C", () => {
+    expect(validateSafeLabel("test\u200Cname", "f")).toContain("control characters");
+  });
+  it("rejects zero-width joiner U+200D", () => {
+    expect(validateSafeLabel("test\u200Dname", "f")).toContain("control characters");
+  });
+  it("rejects RTL override U+202E", () => {
+    expect(validateSafeLabel("test\u202Ename", "f")).toContain("control characters");
+  });
+  it("rejects line separator U+2028", () => {
+    expect(validateSafeLabel("test\u2028name", "f")).toContain("control characters");
+  });
+  it("rejects paragraph separator U+2029", () => {
+    expect(validateSafeLabel("test\u2029name", "f")).toContain("control characters");
+  });
+  it("rejects BOM U+FEFF", () => {
+    expect(validateSafeLabel("\uFEFFtest", "f")).toContain("control characters");
+  });
+  it("still accepts clean ASCII text", () => {
+    expect(validateSafeLabel("Hospitals in Minnesota", "f")).toBeNull();
+  });
+});
+
+// ── D4: XML-delimited user brief ──────────────────────────────────────
+
+describe("D4: user brief is XML-delimited before reaching model", () => {
+  const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+
+  it("interpretAudience wraps brief in <user_brief> tags", () => {
+    const interpretFn = edgeFn.slice(
+      edgeFn.indexOf("async function interpretAudience"),
+      edgeFn.indexOf("async function resolveAudience"),
+    );
+    expect(interpretFn).toContain("<user_brief>");
+    expect(interpretFn).toContain("</user_brief>");
+  });
+
+  it("generateAudienceDraft wraps description in <user_brief> tags", () => {
+    const genFn = edgeFn.slice(
+      edgeFn.indexOf("async function generateAudienceDraft"),
+      edgeFn.indexOf("// ── HTTP handler"),
+    );
+    expect(genFn).toContain("<user_brief>");
+    expect(genFn).toContain("</user_brief>");
+  });
+});
+
+// ── D5: aiDraftSaved reset on method switch ───────────────────────────
+
+describe("D5: aiDraftSaved reset on every method switch", () => {
+  const wizard = read("src/features/playbook/CampaignWizard.tsx");
+
+  it("resets aiDraftSaved before any method branch", () => {
+    // The reset must appear BEFORE the if/else branches
+    const handlerBlock = wizard.slice(
+      wizard.indexOf("setSequenceAttempted(false);"),
+      wizard.indexOf("</button>", wizard.indexOf("setSequenceAttempted(false);") + 100),
+    );
+    const draftResetIdx = handlerBlock.indexOf("setAiDraftSaved(false)");
+    const firstBranchIdx = handlerBlock.indexOf('if (id === "ask-ai")');
+    expect(draftResetIdx).toBeGreaterThan(0);
+    expect(draftResetIdx).toBeLessThan(firstBranchIdx);
+  });
+
+  it("clears aiDraftSavedSnapshotRef before any method branch", () => {
+    const handlerBlock = wizard.slice(
+      wizard.indexOf("setSequenceAttempted(false);"),
+      wizard.indexOf("</button>", wizard.indexOf("setSequenceAttempted(false);") + 100),
+    );
+    expect(handlerBlock).toContain("aiDraftSavedSnapshotRef.current = null");
+  });
+});
+
+// ── D6: accessible Show all/fewer label ───────────────────────────────
+
+describe("D6: Show all/fewer button has aria-label", () => {
+  const flow = read("src/features/playbook/AiAudienceFlow.tsx");
+
+  it("Show all button has aria-label", () => {
+    expect(flow).toContain('aria-label={showAll ? "Show fewer results"');
+  });
+});
+
+// ── D7: bounded client timeout ────────────────────────────────────────
+
+describe("D7: invokeAI has bounded client timeout", () => {
+  const api = read("src/features/playbook/api.ts");
+
+  it("defines AI_INVOKE_TIMEOUT_MS constant", () => {
+    expect(api).toContain("AI_INVOKE_TIMEOUT_MS");
+    expect(api).toContain("120_000");
+  });
+
+  it("creates AbortController with setTimeout", () => {
+    expect(api).toContain("new AbortController()");
+    expect(api).toContain("setTimeout(() => controller.abort()");
+  });
+
+  it("passes signal to supabase.functions.invoke", () => {
+    expect(api).toContain("signal: controller.signal");
+  });
+
+  it("catches AbortError and throws user-friendly message", () => {
+    expect(api).toContain('"AbortError"');
+    expect(api).toContain("Request timed out. Please try again.");
+  });
+
+  it("clears timeout in finally block", () => {
+    expect(api).toContain("clearTimeout(timer)");
+    expect(api).toContain("finally");
+  });
+});

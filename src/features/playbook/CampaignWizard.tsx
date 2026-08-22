@@ -1119,6 +1119,10 @@ export function CampaignWizard({
                           // Clear AI-derived recipients when leaving AI audience;
                           // preserve manual/locked recipients on non-AI switches.
                           const hadAiAudience = !!aiAudienceResult;
+                          // D5: always reset saved-AI state on any method switch
+                          // so the discard guard re-engages correctly
+                          setAiDraftSaved(false);
+                          aiDraftSavedSnapshotRef.current = null;
                           if (id === "ask-ai") {
                             setFlow("ask-ai");
                             setEditingSequence(false);

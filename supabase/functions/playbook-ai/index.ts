@@ -681,11 +681,12 @@ async function interpretAudience(brief: string, userId: string): Promise<Record<
     us_state_codes: US_STATE_CODES,
   };
 
+  // D4: XML-delimit user brief to reduce prompt injection surface
   const modelId = PLAYBOOK_IDEAS_MODEL;
   const text = await callClaude({
     model: modelId,
     system: audienceInterpretSystem(vocabulary),
-    user: trimmed,
+    user: `<user_brief>${trimmed}</user_brief>`,
     maxTokens: 1500,
     temperature: 0.2,
   });
@@ -709,11 +710,11 @@ async function interpretAudience(brief: string, userId: string): Promise<Record<
     parsed.filters = {};
   }
 
-  // Validate — reject on ANY invalid/injection-shaped output, never clean up
+  // D2: validate without reflecting model-provided values in the error
   const errors = validateAudienceSpec(parsed);
   if (errors.length > 0) {
     throw new AudienceActionError(
-      `Invalid model output: ${errors.map((e) => `${e.field}: ${e.message}`).join("; ")}`,
+      "AI interpretation produced invalid output. Please rephrase your description.",
       422,
     );
   }
@@ -888,6 +889,11 @@ async function resolveAudience(
   const members: MemberRow[] = [];
   const seenEmails = new Map<string, number>();
   let totalScanned = 0;
+  // D1: map secondary emails (email2/email3) to ALL canonical member
+  // indices sharing that secondary identity, so suppression checks cover
+  // every contact-level email. Campaign still enrolls only the primary
+  // email; secondary suppression makes the canonical member excluded.
+  const secondaryEmailToMembers = new Map<string, number[]>();
   let scanTruncated = false;
   let totalDuplicateContacts = 0;
 
@@ -1016,7 +1022,8 @@ async function resolveAudience(
       // Exclusion safety always outranks ambiguity.
       const disposition = hasExclusions ? "excluded" : isAmbiguous ? "ambiguous" : "eligible";
 
-      seenEmails.set(primaryEmail, members.length);
+      const memberIdx = members.length;
+      seenEmails.set(primaryEmail, memberIdx);
       members.push({
         contact_id: c.id,
         account_id: a.id,
@@ -1030,6 +1037,16 @@ async function resolveAudience(
         snapshot_account_type: a.account_type,
         snapshot_account_name: a.name,
       });
+
+      // D1: register secondary emails for suppression coverage
+      for (const alt of [c.email2, c.email3]) {
+        const norm = normalizeEmail(alt);
+        if (norm && norm !== primaryEmail && isPlausibleEmail(norm)) {
+          const existing = secondaryEmailToMembers.get(norm);
+          if (existing) { if (!existing.includes(memberIdx)) existing.push(memberIdx); }
+          else secondaryEmailToMembers.set(norm, [memberIdx]);
+        }
+      }
     }
 
     if (contacts.length < CONTACT_PAGE) break;
@@ -1053,7 +1070,12 @@ async function resolveAudience(
   //    Run against ALL matched canonical emails (not just eligible) so
   //    an ambiguous unsubscribed/bounced record is recorded as excluded,
   //    and active enrollment is surfaced consistently.
-  const allMatchedEmails = members.map((m) => m.email_normalized);
+  // D1: include secondary emails in suppression/enrollment checks so a
+  // bounced/unsubscribed email2/email3 makes the contact excluded.
+  const allMatchedEmails = [
+    ...members.map((m) => m.email_normalized),
+    ...secondaryEmailToMembers.keys(),
+  ];
 
   // Suppression check (batched + paginated)
   const suppressionMap = new Map<string, string[]>();
@@ -1104,9 +1126,31 @@ async function resolveAudience(
     }
   }
 
+  // D1: propagate secondary email suppression/enrollment hits to ALL
+  // canonical members sharing that secondary identity. This ensures a
+  // contact with a clean primary but bounced email2 becomes excluded.
+  for (const [secEmail, memberIndices] of secondaryEmailToMembers) {
+    const suppReasons = suppressionMap.get(secEmail);
+    for (const idx of memberIndices) {
+      const m = members[idx];
+      if (suppReasons?.length) {
+        for (const r of suppReasons) {
+          if (!m.reason_codes.includes(r)) m.reason_codes.push(r);
+        }
+        if (!m.reason_codes.includes("secondary_email_suppressed")) {
+          m.reason_codes.push("secondary_email_suppressed");
+        }
+      }
+      if (activeEnrollmentEmails.has(secEmail)) {
+        if (!m.reason_codes.includes("active_enrollment_elsewhere")) {
+          m.reason_codes.push("active_enrollment_elsewhere");
+        }
+      }
+    }
+  }
+
   // Apply suppression + enrollment to ALL matched members, then enforce
   // deterministic precedence: excluded > active_enrollment > ambiguous > eligible.
-  // A member already marked ambiguous but also suppressed becomes excluded.
   for (const m of members) {
     const suppReasons = suppressionMap.get(m.email_normalized);
     if (suppReasons?.length) {
@@ -1114,17 +1158,18 @@ async function resolveAudience(
         if (!m.reason_codes.includes(r)) m.reason_codes.push(r);
       }
     }
-    const hasEnrollment = activeEnrollmentEmails.has(m.email_normalized);
+    const hasEnrollment = activeEnrollmentEmails.has(m.email_normalized) ||
+      m.reason_codes.includes("active_enrollment_elsewhere");
     if (hasEnrollment && !m.reason_codes.includes("active_enrollment_elsewhere")) {
       m.reason_codes.push("active_enrollment_elsewhere");
     }
 
     // Re-derive disposition with deterministic precedence.
     // v_marketing_suppression is authoritative: ANY row it returns is an
-    // exclusion, regardless of reason string (covers lead_do_not_market_to,
-    // lead_do_not_contact, lead_avoid, lead_archived, and any future
-    // suppression branches). Direct contact/account flags are also explicit.
-    const isSuppressed = suppressionMap.has(m.email_normalized);
+    // exclusion, regardless of reason string. Secondary email suppression
+    // also counts (D1).
+    const isSuppressed = suppressionMap.has(m.email_normalized) ||
+      m.reason_codes.includes("secondary_email_suppressed");
     const hasDirectExclusion = m.reason_codes.some((r) =>
       r === "customer_account" || r === "former_customer_account" ||
       r === "partner_account" || r === "contact_do_not_contact" ||
@@ -1269,10 +1314,11 @@ async function generateAudienceDraft(description: string): Promise<Record<string
   // output, endpoints, and internal details are never exposed.
   let parsed: Record<string, unknown>;
   try {
+    // D4: XML-delimit user input
     const text = await callClaude({
       model: PLAYBOOK_IDEAS_MODEL,
       system: audienceDraftGenerateSystem(),
-      user: trimmed,
+      user: `<user_brief>${trimmed}</user_brief>`,
       maxTokens: 4000,
       temperature: 0.7,
     });

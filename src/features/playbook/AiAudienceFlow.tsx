@@ -607,7 +607,8 @@ function MemberList({
       </div>
       {members.length > INITIAL_SHOW && (
         <div className="px-3 py-2 border-t text-center" style={{ borderColor: "var(--camp-line)" }}>
-          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setShowAll(!showAll)}>
+          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setShowAll(!showAll)}
+            aria-label={showAll ? "Show fewer results" : `Show all ${members.length} results`}>
             {showAll ? "Show fewer" : `Show all ${members.length}`}
           </button>
         </div>

@@ -445,9 +445,9 @@ export function normalizeEmail(email: string | null | undefined): string {
 export function validateSafeLabel(s: string, field: string): string | null {
   if (!s.trim()) return `${field} is empty`;
   if (s.length > 80) return `${field} exceeds 80 characters`;
+  // D3: ASCII controls + Unicode zero-width/bidi/separator characters
   // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x1f\x7f]/.test(s)) return `${field} contains control characters`;
-  if (/\n|\r/.test(s)) return `${field} must be single-line`;
+  if (/[\x00-\x1f\x7f\u200B-\u200F\u2028-\u202F\uFEFF]/.test(s)) return `${field} contains control characters`;
   if (/<[^>]*>/.test(s)) return `${field} contains HTML`;
   if (/https?:|ftp:|mailto:|www\.|:\/\//i.test(s)) return `${field} contains URL/protocol`;
   if (/[a-z0-9.-]+\.[a-z]{2,}/i.test(s) && !/\bmedcurity\.com\b/i.test(s)) return `${field} contains domain`;

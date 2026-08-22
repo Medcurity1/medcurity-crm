@@ -1250,7 +1250,9 @@ describe("review 6: v_marketing_suppression is authoritative", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
     expect(edgeFn).toContain("v_marketing_suppression is authoritative");
     expect(edgeFn).toContain("ANY row it returns is an");
-    expect(edgeFn).toContain("lead_do_not_market_to");
+    // D1: comment now mentions secondary email suppression instead of
+    // enumerating individual lead-level reason strings
+    expect(edgeFn).toContain("Secondary email suppression");
   });
 
   it("isSuppressed || hasDirectExclusion drives excluded disposition", () => {
