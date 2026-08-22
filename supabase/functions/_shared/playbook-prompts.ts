@@ -275,89 +275,147 @@ OUTPUT FORMAT (JSON only, no markdown fences):
 Only include filter keys that the user's description calls for. Omit keys with no relevant criteria (do not include empty arrays). ambiguous_criteria and unsupported_criteria should be omitted if empty.`;
 }
 
-// ── Audience draft generation: structured claim-free schema ──────────────
-// The AI fills safe intent fields; the server renders final HTML.
-// Claims are impossible by construction: no free-form assertion field.
+// ── Audience draft: fully server-owned content ──────────────────────────
+//
+// The AI selects ONLY server-owned IDs. No model-authored prose reaches
+// the output. Subject lines, body copy, and CTAs are all server-owned
+// polished strings. Claims are impossible because the model cannot
+// inject text — it can only pick from the allowlists below.
+//
+// SECURITY: rep-callable, no admin training notes, no per-tenant data.
 
-/**
- * System prompt for generate-audience-draft. Uses ONLY the approved Pulse
- * Campaigns token vocabulary: [[First name]], [[Organization]], [[Signature]].
- * No Handlebars/Liquid/template syntax. No invented claims.
- *
- * SECURITY: this prompt is used by the rep-callable generate-audience-draft
- * action. It must NOT include admin training notes or any per-tenant
- * data — only the static server-owned brand context. Admin training notes
- * are reserved for the admin-only generate-campaign action.
- */
-export function audienceDraftGenerateSystem(): string {
-  return `You are an email campaign writer for Medcurity, a HIPAA compliance SaaS company.
+/** Server-owned subject lines. Keyed by position (1=intro, 2=followup, 3=close). */
+export const SUBJECT_MAP: Record<string, { text: string; position: number }> = {
+  intro_hipaa_help:          { text: "HIPAA compliance help for [[Organization]]", position: 1 },
+  intro_compliance_support:  { text: "Compliance support for your organization",   position: 1 },
+  intro_sra_overview:        { text: "Security Risk Analysis for healthcare",       position: 1 },
+  intro_quick_question:      { text: "Quick question about your compliance needs",  position: 1 },
+  followup_checking_in:      { text: "Checking in on compliance",                   position: 2 },
+  followup_still_interested: { text: "Still thinking about HIPAA compliance?",      position: 2 },
+  followup_quick_note:       { text: "A quick note from Medcurity",                 position: 2 },
+  close_final_thought:       { text: "One last thought on compliance",              position: 3 },
+  close_one_more_thing:      { text: "One more way we can help",                    position: 3 },
+  close_last_note:           { text: "Thanks for your time",                        position: 3 },
+};
 
-Medcurity products: Security Risk Analysis (SRA), HIPAA training (Medcurity Academy), PolicyScan, Network Vulnerability Assessment (NVA), BAA Management, Vendor Management.
+/** Server-owned body copy. Each is an array of paragraphs. Position-aware. */
+export const MESSAGE_MAP: Record<string, { paragraphs: string[]; position: number }> = {
+  intro_general_hipaa: { position: 1, paragraphs: [
+    "I wanted to reach out because HIPAA compliance is a challenge for many healthcare organizations, and we may be able to help.",
+    "Medcurity offers tools like our Security Risk Analysis and HIPAA training platform that are designed to make the process more manageable for teams of all sizes.",
+  ]},
+  intro_sra_focused: { position: 1, paragraphs: [
+    "Many healthcare organizations find the HIPAA Security Risk Analysis process complex and time-consuming. Medcurity was built to help with exactly that.",
+    "Our SRA platform walks your team through the process step by step, so nothing gets missed.",
+  ]},
+  intro_academy_focused: { position: 1, paragraphs: [
+    "HIPAA training can be a challenge to coordinate across a healthcare organization. Medcurity Academy was designed to make it straightforward.",
+    "Our training platform covers the topics your team needs, with tracking so you can see who has completed their training.",
+  ]},
+  intro_compliance_tools: { position: 1, paragraphs: [
+    "Keeping up with HIPAA requirements can be overwhelming, especially for growing healthcare organizations.",
+    "Medcurity offers a suite of compliance tools, including our Security Risk Analysis, training platform, and policy management, all in one place.",
+  ]},
+  followup_value_add: { position: 2, paragraphs: [
+    "I wanted to follow up on my previous email. Many organizations we speak with appreciate having a structured approach to compliance rather than trying to piece things together on their own.",
+    "If you have any questions about how Medcurity could fit into your workflow, I am happy to walk you through it.",
+  ]},
+  followup_gentle_reminder: { position: 2, paragraphs: [
+    "I know compliance is just one of many priorities on your plate. I wanted to check in and see if you had a chance to look into Medcurity.",
+    "We are here whenever the timing is right for a conversation.",
+  ]},
+  followup_different_angle: { position: 2, paragraphs: [
+    "In addition to our Security Risk Analysis, Medcurity also offers tools for BAA management, vendor management, and policy review.",
+    "Sometimes organizations start with one area and expand from there. Happy to discuss what would be the best fit for your needs.",
+  ]},
+  close_soft_ask: { position: 3, paragraphs: [
+    "I did not want to keep filling your inbox, so this will be my last note for now.",
+    "If HIPAA compliance is something your organization is working on, I would welcome the chance to have a brief conversation about how Medcurity might help.",
+  ]},
+  close_summary: { position: 3, paragraphs: [
+    "Just a final note. Medcurity is here to help healthcare organizations approach HIPAA compliance with the right tools and support.",
+    "If now is not the right time, no worries at all. Feel free to reach out whenever it makes sense.",
+  ]},
+  close_friendly_close: { position: 3, paragraphs: [
+    "I appreciate your time reading these emails. Compliance is important work, and I hope Medcurity can be a useful resource for [[Organization]] when the time is right.",
+  ]},
+};
 
-You will produce a STRUCTURED JSON schema. The server renders the final email. You do NOT write HTML, Markdown, URLs, links, or template syntax.
-
-OUTPUT FORMAT (JSON only, no markdown, no preamble):
-{
-  "campaign_name": "Short name, plain text, no claims, max 80 chars",
-  "target_audience": "Who this targets, plain text, max 80 chars",
-  "sequence": [
-    {
-      "seq_number": 1,
-      "delay_days": 0,
-      "subject": "Subject line, plain text, under 60 characters",
-      "greeting_name": true,
-      "body_paragraphs": [
-        "First paragraph of plain text.",
-        "Second paragraph. Describe how Medcurity can help."
-      ],
-      "cta": "reply_to_schedule"
-    }
-  ]
-}
-
-FIELD RULES:
-- campaign_name/target_audience: plain text, no numbers/stats/claims
-- seq_number: exactly 1, 2, 3
-- delay_days: email 1 = 0, email 2 = 3 or 4, email 3 = 3 or 4
-- subject: plain text, max 60 characters
-- greeting_name: always true (server adds greeting)
-- body_paragraphs: 1-4 plain text strings. No HTML. No URLs. No template syntax. No statistics, percentages, customer counts, guarantees, compliance claims, awards, testimonials, case studies, outcomes, or deadlines.
-- cta: one of: "reply_to_schedule", "visit_medcurity", "reply_to_learn_more", "book_a_demo"
-
-CONSTRAINTS:
-- Exactly 3 emails.
-- body_paragraphs: plain text only. Write about Medcurity products and how they help healthcare organizations. Be conversational and conservative.
-- Do NOT write claims, statistics, guarantees, compliance assertions, or outcomes.
-- The server adds greeting, signature, CTA text, and formatting.`;
-}
-
-/** Server-owned CTA text. AI picks an ID; server renders the copy. */
-export const AUDIENCE_DRAFT_CTA_MAP: Record<string, string> = {
+/** Server-owned CTA text. */
+export const CTA_MAP: Record<string, string> = {
   reply_to_schedule: "Reply to this email to schedule a call.",
   visit_medcurity: "Visit medcurity.com to learn more.",
   reply_to_learn_more: "Reply and we will send you more information.",
   book_a_demo: "Reply to this email to book a quick demo.",
 };
 
-/** Render structured draft email into safe HTML. Server owns the output format. */
-export function renderAudienceDraftEmail(email: {
-  greeting_name: boolean;
-  body_paragraphs: string[];
-  cta: string;
-}): string {
-  const parts: string[] = [];
-  if (email.greeting_name) parts.push("<p>Hi [[First name]],</p>");
-  for (const para of email.body_paragraphs) {
-    parts.push("<p>" + escapeForHtml(para) + "</p>");
-  }
-  const ctaText = AUDIENCE_DRAFT_CTA_MAP[email.cta] ?? AUDIENCE_DRAFT_CTA_MAP.reply_to_learn_more;
-  parts.push("<p>" + escapeForHtml(ctaText) + "</p>");
-  parts.push("<p>[[Signature]]</p>");
-  return parts.join("");
+/** All valid IDs for the prompt. */
+export const SUBJECT_IDS = Object.keys(SUBJECT_MAP);
+export const MESSAGE_IDS = Object.keys(MESSAGE_MAP);
+export const CTA_IDS = Object.keys(CTA_MAP);
+
+/**
+ * System prompt for generate-audience-draft. Model output is ONLY IDs
+ * from server-owned allowlists. No model-authored prose.
+ */
+export function audienceDraftGenerateSystem(): string {
+  return `You are selecting content for a 3-email outreach sequence for Medcurity, a HIPAA compliance SaaS company. You do NOT write any copy. You select IDs from server-owned allowlists. The server renders all subject lines, body copy, and CTAs from those IDs.
+
+OUTPUT FORMAT (JSON only, no markdown, no preamble):
+{
+  "campaign_name": "Short plain-text label, max 60 chars",
+  "target_audience": "Short plain-text label, max 60 chars",
+  "sequence": [
+    { "seq_number": 1, "delay_days": 0, "subject_id": "intro_hipaa_help", "message_id": "intro_general_hipaa", "cta_id": "reply_to_schedule" },
+    { "seq_number": 2, "delay_days": 3, "subject_id": "followup_checking_in", "message_id": "followup_value_add", "cta_id": "visit_medcurity" },
+    { "seq_number": 3, "delay_days": 4, "subject_id": "close_final_thought", "message_id": "close_soft_ask", "cta_id": "reply_to_learn_more" }
+  ]
 }
 
-function escapeForHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+AVAILABLE IDs:
+
+subject_id (position 1 = intro, 2 = followup, 3 = close):
+${SUBJECT_IDS.map((id) => `  "${id}" (position ${SUBJECT_MAP[id].position})`).join("\n")}
+
+message_id (position 1 = intro, 2 = followup, 3 = close):
+${MESSAGE_IDS.map((id) => `  "${id}" (position ${MESSAGE_MAP[id].position})`).join("\n")}
+
+cta_id:
+${CTA_IDS.map((id) => `  "${id}"`).join("\n")}
+
+RULES:
+- Exactly 3 emails: seq_number 1, 2, 3.
+- Email 1: delay_days 0, subject_id position 1, message_id position 1.
+- Email 2: delay_days 3 or 4, subject_id position 2, message_id position 2.
+- Email 3: delay_days 3 or 4, subject_id position 3, message_id position 3.
+- campaign_name/target_audience: short plain-text labels only. No URLs, no HTML, no claims, no statistics.
+- Pick IDs that best match the user's audience description.
+- Do NOT write any prose, subjects, or body text. Only select IDs.`;
+}
+
+/**
+ * Render a fully server-owned email from validated IDs.
+ * No model-authored text in the output. Greeting, body, CTA, and
+ * signature are all server-owned strings.
+ */
+export function renderAudienceDraftEmail(
+  subjectId: string,
+  messageId: string,
+  ctaId: string,
+): { subject: string; body_html: string } {
+  const subj = SUBJECT_MAP[subjectId];
+  const msg = MESSAGE_MAP[messageId];
+  const cta = CTA_MAP[ctaId] ?? CTA_MAP.reply_to_learn_more;
+
+  const parts: string[] = [];
+  parts.push("<p>Hi [[First name]],</p>");
+  for (const para of msg.paragraphs) {
+    parts.push("<p>" + para + "</p>");
+  }
+  parts.push("<p>" + cta + "</p>");
+  parts.push("<p>[[Signature]]</p>");
+
+  return { subject: subj.text, body_html: parts.join("") };
 }
 
 /** Word-overlap duplicate check for training notes (server.js:7117). */

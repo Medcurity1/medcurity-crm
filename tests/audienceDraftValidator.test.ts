@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from "vitest";
 import { validateAudienceDraft, type AudienceDraftPayload } from "../supabase/functions/_shared/audience-spec";
-import { renderAudienceDraftEmail, AUDIENCE_DRAFT_CTA_MAP } from "../supabase/functions/_shared/playbook-prompts";
+import { renderAudienceDraftEmail, CTA_MAP, SUBJECT_MAP, MESSAGE_MAP, SUBJECT_IDS, MESSAGE_IDS, CTA_IDS } from "../supabase/functions/_shared/playbook-prompts";
 import { readFileSync } from "fs";
 import path from "path";
 const read = (relative: string) => readFileSync(path.resolve(__dirname, "..", relative), "utf8");
@@ -517,78 +517,69 @@ describe("UX: generation error/retry in CampaignWizard", () => {
 
 describe("renderAudienceDraftEmail (server rendering)", () => {
   it("produces greeting + body paragraphs + CTA + signature", () => {
-    const html = renderAudienceDraftEmail({
-      greeting_name: true,
-      body_paragraphs: ["Hello from Medcurity.", "We help with HIPAA."],
-      cta: "reply_to_schedule",
-    });
+    const result = renderAudienceDraftEmail("intro_hipaa_help", "intro_general_hipaa", "reply_to_schedule");
+    const html = result.body_html;
     expect(html).toContain("<p>Hi [[First name]],</p>");
-    expect(html).toContain("<p>Hello from Medcurity.</p>");
-    expect(html).toContain("<p>We help with HIPAA.</p>");
-    expect(html).toContain("<p>Reply to this email to schedule a call.</p>");
+    // Body paragraphs come from MESSAGE_MAP
+    for (const para of MESSAGE_MAP.intro_general_hipaa.paragraphs) {
+      expect(html).toContain(`<p>${para}</p>`);
+    }
+    // CTA from CTA_MAP
+    expect(html).toContain(`<p>${CTA_MAP.reply_to_schedule}</p>`);
     expect(html).toContain("<p>[[Signature]]</p>");
     // Signature is the exact last element
     expect(html).toMatch(/<p>\[\[Signature\]\]<\/p>$/);
   });
 
-  it("escapes HTML in body paragraphs", () => {
-    const html = renderAudienceDraftEmail({
-      greeting_name: true,
-      body_paragraphs: ['We help <script>alert(1)</script> orgs.'],
-      cta: "visit_medcurity",
-    });
-    expect(html).toContain("&lt;script&gt;");
-    expect(html).not.toContain("<script>");
+  it("server-owned message content is used verbatim", () => {
+    const result = renderAudienceDraftEmail("intro_sra_overview", "intro_sra_focused", "visit_medcurity");
+    const html = result.body_html;
+    // Body paragraphs from MESSAGE_MAP are rendered verbatim (server-owned, no escaping needed)
+    for (const para of MESSAGE_MAP.intro_sra_focused.paragraphs) {
+      expect(html).toContain(`<p>${para}</p>`);
+    }
+    // Subject from SUBJECT_MAP is returned verbatim
+    expect(result.subject).toBe(SUBJECT_MAP.intro_sra_overview.text);
   });
 
   it("falls back to default CTA for unknown key", () => {
-    const html = renderAudienceDraftEmail({
-      greeting_name: true,
-      body_paragraphs: ["Text."],
-      cta: "nonexistent_cta",
-    });
-    expect(html).toContain(AUDIENCE_DRAFT_CTA_MAP.reply_to_learn_more);
+    const result = renderAudienceDraftEmail("intro_hipaa_help", "intro_general_hipaa", "nonexistent_cta");
+    expect(result.body_html).toContain(CTA_MAP.reply_to_learn_more);
   });
 
   it("server-rendered HTML passes the validator", () => {
-    const html = renderAudienceDraftEmail({
-      greeting_name: true,
-      body_paragraphs: ["We offer HIPAA compliance tools for healthcare organizations.", "Our Security Risk Analysis helps identify gaps."],
-      cta: "book_a_demo",
-    });
+    const e1 = renderAudienceDraftEmail("intro_compliance_support", "intro_general_hipaa", "book_a_demo");
+    const e2 = renderAudienceDraftEmail("followup_checking_in", "followup_value_add", "reply_to_schedule");
+    const e3 = renderAudienceDraftEmail("close_final_thought", "close_soft_ask", "visit_medcurity");
     const payload: AudienceDraftPayload = {
       campaign_name: "HIPAA Outreach",
       target_audience: "Hospitals in MN",
       sequence: [
-        { seq_number: 1, delay_days: 0, subject: "HIPAA compliance help", body_html: html },
-        { seq_number: 2, delay_days: 3, subject: "Quick follow-up", body_html: renderAudienceDraftEmail({ greeting_name: true, body_paragraphs: ["Just checking in."], cta: "reply_to_schedule" }) },
-        { seq_number: 3, delay_days: 4, subject: "One more thought", body_html: renderAudienceDraftEmail({ greeting_name: true, body_paragraphs: ["We would love to help."], cta: "visit_medcurity" }) },
+        { seq_number: 1, delay_days: 0, subject: e1.subject, body_html: e1.body_html },
+        { seq_number: 2, delay_days: 3, subject: e2.subject, body_html: e2.body_html },
+        { seq_number: 3, delay_days: 4, subject: e3.subject, body_html: e3.body_html },
       ],
     };
     expect(validateAudienceDraft(payload)).toEqual([]);
   });
 
-  it("claims in AI paragraph text are escaped to plain text by server", () => {
-    // Even if the AI sneaks claims into body_paragraphs, the server
-    // HTML-escapes them so they render as visible text, not as executable.
-    const html = renderAudienceDraftEmail({
-      greeting_name: true,
-      body_paragraphs: ['We serve 1,000+ organizations.'],
-      cta: "reply_to_schedule",
-    });
-    // The claim text IS rendered (as escaped plain text), but the validator
-    // catches it when validating the rendered output.
-    const payload: AudienceDraftPayload = {
-      campaign_name: "Test",
-      target_audience: "Test",
-      sequence: [
-        { seq_number: 1, delay_days: 0, subject: "Test", body_html: html },
-        { seq_number: 2, delay_days: 3, subject: "Test 2", body_html: renderAudienceDraftEmail({ greeting_name: true, body_paragraphs: ["Text."], cta: "reply_to_schedule" }) },
-        { seq_number: 3, delay_days: 4, subject: "Test 3", body_html: renderAudienceDraftEmail({ greeting_name: true, body_paragraphs: ["Text."], cta: "reply_to_schedule" }) },
-      ],
-    };
-    const errors = validateAudienceDraft(payload);
-    expect(errors.some((e) => e.includes("social-proof claim"))).toBe(true);
+  it("server-owned paragraphs contain no claims", () => {
+    // Since body paragraphs are now server-owned constants, verify none contain
+    // quantitative social-proof claims, percentage claims, or guarantee language.
+    const claimPatterns = [
+      /\d[\d,]*\+?\s*(healthcare|organizations|customers|clients)/i,
+      /\d+%/,
+      /\bguarantee[sd]?\b/i,
+      /\bensures?\b/i,
+      /\bproven\b/i,
+    ];
+    for (const [id, entry] of Object.entries(MESSAGE_MAP)) {
+      for (const para of entry.paragraphs) {
+        for (const pattern of claimPatterns) {
+          expect(pattern.test(para), `MESSAGE_MAP.${id} paragraph "${para}" matches claim pattern ${pattern}`).toBe(false);
+        }
+      }
+    }
   });
 });
 
@@ -686,13 +677,13 @@ describe("validateAudienceDraft: continues after structural errors", () => {
 
 // ── CTA allowlist ─────────────────────────────────────────────────────
 
-describe("AUDIENCE_DRAFT_CTA_MAP", () => {
+describe("CTA_MAP", () => {
   it("has exactly 4 server-owned CTA options", () => {
-    expect(Object.keys(AUDIENCE_DRAFT_CTA_MAP)).toHaveLength(4);
-    expect(AUDIENCE_DRAFT_CTA_MAP.reply_to_schedule).toBeTruthy();
-    expect(AUDIENCE_DRAFT_CTA_MAP.visit_medcurity).toBeTruthy();
-    expect(AUDIENCE_DRAFT_CTA_MAP.reply_to_learn_more).toBeTruthy();
-    expect(AUDIENCE_DRAFT_CTA_MAP.book_a_demo).toBeTruthy();
+    expect(Object.keys(CTA_MAP)).toHaveLength(4);
+    expect(CTA_MAP.reply_to_schedule).toBeTruthy();
+    expect(CTA_MAP.visit_medcurity).toBeTruthy();
+    expect(CTA_MAP.reply_to_learn_more).toBeTruthy();
+    expect(CTA_MAP.book_a_demo).toBeTruthy();
   });
 });
 
@@ -760,7 +751,9 @@ describe("generate-audience-draft: structured schema + server rendering", () => 
   it("edge function imports and calls renderAudienceDraftEmail", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
     expect(edgeFn).toContain("renderAudienceDraftEmail");
-    expect(edgeFn).toContain("AUDIENCE_DRAFT_CTA_MAP");
+    expect(edgeFn).toContain("SUBJECT_MAP");
+    expect(edgeFn).toContain("MESSAGE_MAP");
+    expect(edgeFn).toContain("CTA_MAP");
   });
   it("edge function validates structured intent fields before rendering", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
@@ -768,14 +761,120 @@ describe("generate-audience-draft: structured schema + server rendering", () => 
       edgeFn.indexOf("async function generateAudienceDraft"),
       edgeFn.indexOf("// ── HTTP handler"),
     );
-    expect(fnBlock).toContain("body_paragraphs");
-    expect(fnBlock).toContain("greeting_name");
-    expect(fnBlock).toContain("cta");
+    expect(fnBlock).toContain("subject_id");
+    expect(fnBlock).toContain("message_id");
+    expect(fnBlock).toContain("cta_id");
     // Validates the rendered output too
     expect(fnBlock).toContain("validateAudienceDraft");
   });
   it("returns bounded actionable error list (up to 5)", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
     expect(edgeFn).toContain("validationErrors.slice(0, 5)");
+  });
+});
+
+// ── ID-only schema: no model prose ────────────────────────────────────
+
+import { validateSafeLabel } from "../supabase/functions/_shared/audience-spec";
+
+describe("ID-only schema: no model prose in output", () => {
+  it("all SUBJECT_MAP entries have position 1, 2, or 3", () => {
+    for (const [id, entry] of Object.entries(SUBJECT_MAP)) {
+      expect([1, 2, 3]).toContain(entry.position);
+      expect(entry.text.length).toBeGreaterThan(0);
+      expect(entry.text.length).toBeLessThanOrEqual(80);
+    }
+  });
+  it("all MESSAGE_MAP entries have position 1, 2, or 3 with nonempty paragraphs", () => {
+    for (const [id, entry] of Object.entries(MESSAGE_MAP)) {
+      expect([1, 2, 3]).toContain(entry.position);
+      expect(entry.paragraphs.length).toBeGreaterThan(0);
+      for (const p of entry.paragraphs) {
+        expect(p.length).toBeGreaterThan(0);
+      }
+    }
+  });
+  it("each position has at least 3 subject IDs and 3 message IDs", () => {
+    for (const pos of [1, 2, 3]) {
+      const subjects = SUBJECT_IDS.filter((id) => SUBJECT_MAP[id].position === pos);
+      const messages = MESSAGE_IDS.filter((id) => MESSAGE_MAP[id].position === pos);
+      expect(subjects.length).toBeGreaterThanOrEqual(3);
+      expect(messages.length).toBeGreaterThanOrEqual(3);
+    }
+  });
+  it("server-owned subjects contain no claims or URLs", () => {
+    for (const [id, entry] of Object.entries(SUBJECT_MAP)) {
+      expect(/\d[\d,]*\+?\s*(?:organizations|customers)/i.test(entry.text)).toBe(false);
+      expect(/https?:/i.test(entry.text)).toBe(false);
+    }
+  });
+  it("renderAudienceDraftEmail returns subject from SUBJECT_MAP, not model text", () => {
+    const result = renderAudienceDraftEmail("intro_quick_question", "intro_compliance_tools", "book_a_demo");
+    expect(result.subject).toBe(SUBJECT_MAP.intro_quick_question.text);
+  });
+  it("renderAudienceDraftEmail returns body from MESSAGE_MAP, not model text", () => {
+    const result = renderAudienceDraftEmail("followup_checking_in", "followup_gentle_reminder", "reply_to_schedule");
+    for (const para of MESSAGE_MAP.followup_gentle_reminder.paragraphs) {
+      expect(result.body_html).toContain(`<p>${para}</p>`);
+    }
+  });
+  it("prompt tells model to select IDs only, not write prose", () => {
+    const prompt = audienceDraftGenerateSystem();
+    expect(prompt).toContain("subject_id");
+    expect(prompt).toContain("message_id");
+    expect(prompt).toContain("cta_id");
+    expect(prompt).toContain("You do NOT write any copy");
+    expect(prompt).not.toContain("body_paragraphs");
+    expect(prompt).not.toContain("body_html");
+  });
+});
+
+import { audienceDraftGenerateSystem } from "../supabase/functions/_shared/playbook-prompts";
+
+describe("generator root guard", () => {
+  it("edge function guards against non-object parse result", () => {
+    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+    const fn = edgeFn.slice(edgeFn.indexOf("const parsed = parseJsonResponse"), edgeFn.indexOf("// ── Validate model-provided labels"));
+    expect(fn).toContain("Array.isArray(parsed)");
+    expect(fn).toContain("non-object response");
+  });
+});
+
+describe("validateSafeLabel (behavioral)", () => {
+  it("accepts clean short label", () => {
+    expect(validateSafeLabel("Hospitals in Minnesota", "test")).toBeNull();
+  });
+  it("rejects empty", () => {
+    expect(validateSafeLabel("", "test")).toContain("empty");
+  });
+  it("rejects overlong", () => {
+    expect(validateSafeLabel("x".repeat(81), "test")).toContain("80");
+  });
+  it("rejects control chars including newlines", () => {
+    expect(validateSafeLabel("line1\nline2", "test")).toContain("control characters");
+  });
+  it("rejects HTML", () => {
+    expect(validateSafeLabel("text <b>bold</b>", "test")).toContain("HTML");
+  });
+  it("rejects URLs", () => {
+    expect(validateSafeLabel("see https://evil.com", "test")).toContain("URL");
+  });
+  it("rejects bare domains (non-medcurity)", () => {
+    expect(validateSafeLabel("visit evil.com/path", "test")).toContain("domain");
+  });
+  it("rejects email addresses (caught as domain)", () => {
+    const result = validateSafeLabel("contact user@example.com", "test");
+    expect(result).toBeTruthy();
+    // May be caught as domain or email address depending on check order
+    expect(result!.includes("domain") || result!.includes("email")).toBe(true);
+  });
+  it("rejects template syntax", () => {
+    expect(validateSafeLabel("Hello {{name}}", "test")).toContain("template");
+  });
+  it("rejects Markdown syntax", () => {
+    expect(validateSafeLabel("this is **bold**", "test")).toContain("Markdown");
+  });
+  it("rejects stray delimiters", () => {
+    expect(validateSafeLabel("test [[ stuff", "test")).toContain("template");
   });
 });

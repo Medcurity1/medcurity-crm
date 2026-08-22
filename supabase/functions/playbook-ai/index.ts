@@ -28,7 +28,9 @@ import {
   ideasUserPrompt,
   campaignGenerateSystem,
   audienceDraftGenerateSystem,
-  AUDIENCE_DRAFT_CTA_MAP,
+  SUBJECT_MAP,
+  MESSAGE_MAP,
+  CTA_MAP,
   renderAudienceDraftEmail,
   campaignSuggestSystem,
   campaignRegenerateSystem,
@@ -61,6 +63,7 @@ import {
   PRIVACY_SCREEN_VERSION,
   isStagingProject,
   validateAudienceDraft,
+  validateSafeLabel,
   type AudienceDraftPayload,
 } from "../_shared/audience-spec.ts";
 
@@ -1268,18 +1271,29 @@ async function generateAudienceDraft(description: string): Promise<Record<string
   });
   const parsed = parseJsonResponse(text);
 
-  // ── Validate structured intent fields ──────────────────────────
+  // ── Root null/primitive/array guard ────────────────────────────
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new AudienceActionError("AI returned non-object response", 422);
+  }
+
+  // ── Validate model-provided labels ────────────────────────────
   if (typeof parsed.campaign_name !== "string" || !parsed.campaign_name.trim()) {
     throw new AudienceActionError("AI returned empty campaign_name", 422);
   }
   if (typeof parsed.target_audience !== "string" || !parsed.target_audience.trim()) {
     throw new AudienceActionError("AI returned empty target_audience", 422);
   }
+  // Strict safe label validation on model-provided strings
+  const labelErrors = validateSafeLabel(String(parsed.campaign_name), "campaign_name");
+  if (labelErrors) throw new AudienceActionError(labelErrors, 422);
+  const tgtErrors = validateSafeLabel(String(parsed.target_audience), "target_audience");
+  if (tgtErrors) throw new AudienceActionError(tgtErrors, 422);
+
   if (!Array.isArray(parsed.sequence) || parsed.sequence.length !== 3) {
     throw new AudienceActionError("AI must produce exactly 3 emails", 422);
   }
 
-  // ── Server-render each email from safe intent fields ───────────
+  // ── Validate IDs and server-render ────────────────────────────
   const renderedSequence = [];
   for (let i = 0; i < 3; i++) {
     const raw = parsed.sequence[i] as Record<string, unknown>;
@@ -1289,51 +1303,46 @@ async function generateAudienceDraft(description: string): Promise<Record<string
     const n = i + 1;
     if (raw.seq_number !== n) throw new AudienceActionError(`Email ${n}: seq_number must be ${n}`, 422);
     if (typeof raw.delay_days !== "number" || !Number.isInteger(raw.delay_days)) throw new AudienceActionError(`Email ${n}: delay_days must be an integer`, 422);
-    if (typeof raw.subject !== "string" || !raw.subject.trim()) throw new AudienceActionError(`Email ${n}: missing subject`, 422);
-    if (!Array.isArray(raw.body_paragraphs) || raw.body_paragraphs.length === 0) throw new AudienceActionError(`Email ${n}: body_paragraphs must be a nonempty array`, 422);
-    if (raw.body_paragraphs.length > 4) throw new AudienceActionError(`Email ${n}: body_paragraphs cannot exceed 4 entries`, 422);
-    for (let j = 0; j < raw.body_paragraphs.length; j++) {
-      if (typeof raw.body_paragraphs[j] !== "string" || !raw.body_paragraphs[j].trim()) {
-        throw new AudienceActionError(`Email ${n}: body_paragraphs[${j}] must be a nonempty string`, 422);
-      }
-    }
-    const cta = typeof raw.cta === "string" ? raw.cta : "reply_to_learn_more";
-    if (!AUDIENCE_DRAFT_CTA_MAP[cta]) {
-      throw new AudienceActionError(`Email ${n}: unknown cta "${cta}"`, 422);
-    }
+    if (n === 1 && raw.delay_days !== 0) throw new AudienceActionError(`Email ${n}: first email delay_days must be 0`, 422);
+    if (n > 1 && (raw.delay_days < 3 || raw.delay_days > 4)) throw new AudienceActionError(`Email ${n}: follow-up delay_days must be 3-4`, 422);
 
-    // Server renders the final HTML from safe intent fields
-    const bodyHtml = renderAudienceDraftEmail({
-      greeting_name: true,
-      body_paragraphs: raw.body_paragraphs as string[],
-      cta,
-    });
+    // Validate IDs against server-owned allowlists
+    const subjectId = String(raw.subject_id ?? "");
+    const messageId = String(raw.message_id ?? "");
+    const ctaId = String(raw.cta_id ?? "reply_to_learn_more");
+    if (!SUBJECT_MAP[subjectId]) throw new AudienceActionError(`Email ${n}: unknown subject_id "${subjectId}"`, 422);
+    if (!MESSAGE_MAP[messageId]) throw new AudienceActionError(`Email ${n}: unknown message_id "${messageId}"`, 422);
+    if (!CTA_MAP[ctaId]) throw new AudienceActionError(`Email ${n}: unknown cta_id "${ctaId}"`, 422);
+    // Position compatibility
+    if (SUBJECT_MAP[subjectId].position !== n) throw new AudienceActionError(`Email ${n}: subject_id "${subjectId}" is for position ${SUBJECT_MAP[subjectId].position}`, 422);
+    if (MESSAGE_MAP[messageId].position !== n) throw new AudienceActionError(`Email ${n}: message_id "${messageId}" is for position ${MESSAGE_MAP[messageId].position}`, 422);
 
+    // Server renders everything from server-owned maps. No model text in output.
+    const rendered = renderAudienceDraftEmail(subjectId, messageId, ctaId);
     renderedSequence.push({
       seq_number: n,
       delay_days: raw.delay_days,
-      subject: raw.subject,
-      body_html: bodyHtml,
+      subject: rendered.subject,
+      body_html: rendered.body_html,
     });
   }
 
-  // Build the output payload in the standard GeneratedCampaign shape
   const campaign = {
-    campaign_name: String(parsed.campaign_name).slice(0, 200),
-    target_audience: String(parsed.target_audience).slice(0, 200),
+    campaign_name: String(parsed.campaign_name).slice(0, 60),
+    target_audience: String(parsed.target_audience).slice(0, 60),
     sequence: renderedSequence,
   };
 
-  // ── Validate the rendered output via shared pure validator ──────
+  // ── Final safety: validate rendered output ─────────────────────
   const validationErrors = validateAudienceDraft(campaign as AudienceDraftPayload);
   if (validationErrors.length > 0) {
     throw new AudienceActionError(
-      `AI output failed content validation: ${validationErrors.slice(0, 5).join("; ")}`,
+      `Server-rendered output failed validation: ${validationErrors.slice(0, 5).join("; ")}`,
       422,
     );
   }
 
-  // No DB reads, no DB writes, no Smartlead, no enrollment — pure generation only.
+  // No DB reads, no DB writes, no Smartlead, no enrollment.
   return { success: true, campaign };
 }
 

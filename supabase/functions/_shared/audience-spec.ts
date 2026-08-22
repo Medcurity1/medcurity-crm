@@ -436,6 +436,28 @@ export function normalizeEmail(email: string | null | undefined): string {
   return (email ?? "").trim().toLowerCase();
 }
 
+/**
+ * Validate a model-provided label (campaign_name, target_audience) as
+ * safe single-line plain text. Returns an error string or null if valid.
+ * Rejects: controls, HTML, URLs/protocols, domains, Markdown syntax,
+ * template tokens, bare emails, stray/spaced delimiters.
+ */
+export function validateSafeLabel(s: string, field: string): string | null {
+  if (!s.trim()) return `${field} is empty`;
+  if (s.length > 80) return `${field} exceeds 80 characters`;
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(s)) return `${field} contains control characters`;
+  if (/\n|\r/.test(s)) return `${field} must be single-line`;
+  if (/<[^>]*>/.test(s)) return `${field} contains HTML`;
+  if (/https?:|ftp:|mailto:|www\.|:\/\//i.test(s)) return `${field} contains URL/protocol`;
+  if (/[a-z0-9.-]+\.[a-z]{2,}/i.test(s) && !/\bmedcurity\.com\b/i.test(s)) return `${field} contains domain`;
+  if (/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(s)) return `${field} contains email address`;
+  if (/\[\[|\]\]|\{\{|\}\}|\{%|%\}|%signature%|\$\{|<%/i.test(s)) return `${field} contains template syntax`;
+  if (/[*_`#>]/.test(s)) return `${field} contains Markdown syntax`;
+  if (/\[.+\]\(.+\)/.test(s)) return `${field} contains Markdown link`;
+  return null;
+}
+
 // ── Audience draft content validator (pure, deterministic) ───────────────
 //
 // Validates a complete AI-generated campaign draft against the Staging

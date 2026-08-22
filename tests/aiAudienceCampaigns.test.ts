@@ -1695,44 +1695,43 @@ describe("audience draft content contract (prompt + validation)", () => {
     expect(genBlock).not.toContain("campaignGenerateSystem");
   });
 
-  it("prompt specifies structured JSON schema with greeting_name, body_paragraphs, cta", () => {
+  it("prompt specifies ID-selection schema with subject_id, message_id, cta_id", () => {
     expect(prompts).toContain("audienceDraftGenerateSystem");
     const promptFn = prompts.slice(
       prompts.indexOf("function audienceDraftGenerateSystem"),
       prompts.indexOf("/** Word-overlap"),
     );
-    expect(promptFn).toContain("STRUCTURED JSON schema");
-    expect(promptFn).toContain("greeting_name");
-    expect(promptFn).toContain("body_paragraphs");
-    expect(promptFn).toContain("cta");
-    // Server renders tokens; prompt does not instruct model to write them
-    expect(promptFn).toContain("[[First name]]");
-    expect(promptFn).toContain("[[Signature]]");
+    expect(promptFn).toContain("selecting content");
+    expect(promptFn).toContain("subject_id");
+    expect(promptFn).toContain("message_id");
+    expect(promptFn).toContain("cta_id");
+    expect(promptFn).toContain("AVAILABLE IDs");
     // Must NOT instruct use of Handlebars/Liquid as the intended syntax
     expect(promptFn).not.toMatch(/Use.*Smartlead.*liquid syntax.*\{\{#if/i);
   });
 
-  it("prompt forbids HTML, Markdown, URLs, links, and template syntax", () => {
+  it("prompt forbids writing prose (model only selects IDs)", () => {
     const promptFn = prompts.slice(
       prompts.indexOf("function audienceDraftGenerateSystem"),
       prompts.indexOf("/** Word-overlap"),
     );
-    // Prompt now uses structured JSON and bans free-form syntax holistically
-    expect(promptFn).toContain("No HTML");
-    expect(promptFn).toContain("No URLs");
-    expect(promptFn).toContain("No template syntax");
-    expect(promptFn).toContain("Markdown");
+    // Model selects IDs, does not write any copy
+    expect(promptFn).toContain("Do NOT write any prose");
+    expect(promptFn).toContain("Only select IDs");
+    expect(promptFn).toContain("no HTML");
+    expect(promptFn).toContain("no claims");
   });
 
-  it("prompt has strong no-invented-claims rule", () => {
+  it("prompt has no-claims rule via label constraints", () => {
     const promptFn = prompts.slice(
       prompts.indexOf("function audienceDraftGenerateSystem"),
       prompts.indexOf("/** Word-overlap"),
     );
-    // Structured JSON prompt forbids claims via field rules and constraints
-    expect(promptFn).toContain("No statistics");
-    expect(promptFn).toContain("guarantees");
-    expect(promptFn).toContain("Do NOT write claims");
+    // campaign_name/target_audience are the only model-authored text; prompt constrains them
+    expect(promptFn).toContain("no claims");
+    expect(promptFn).toContain("no statistics");
+    expect(promptFn).toContain("plain-text labels only");
+    expect(promptFn).toContain("Do NOT write any prose");
   });
 
   // ── Validation rejects exact bad patterns (now in shared validator) ──
