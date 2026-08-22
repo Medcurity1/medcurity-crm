@@ -799,7 +799,7 @@ async function resolveAudience(
       if (existingRun) {
         return existingRun as Record<string, unknown>;
       }
-      throw new AudienceActionError("Interpretation already consumed", 409);
+      throw new AudienceActionError("This audience interpretation has already been used and cannot be resubmitted. Start a new audience search.", 409);
     }
     if (new Date(interp.expires_at as string) < new Date()) throw new AudienceActionError("Interpretation has expired", 409);
 

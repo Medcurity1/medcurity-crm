@@ -1596,9 +1596,8 @@ describe("resolveAudience: response-loss recovery", () => {
     expect(edgeFn).toContain("audience_get_consumed_run");
   });
 
-  it("falls through to 409 if no owned run found", () => {
-    // If recovery returns null, the original 409 is still thrown
-    expect(edgeFn).toContain("Interpretation already consumed");
+  it("falls through to fixed 409 if no owned run found", () => {
+    expect(edgeFn).toContain("already been used and cannot be resubmitted");
   });
 
   it("uses owner-checked retrieval (userId passed to RPC)", () => {
@@ -1672,8 +1671,8 @@ describe("recovery RPC returns exact UI-expected shape", () => {
     expect(migration).toContain("m.disposition = 'active_enrollment'");
   });
 
-  it("orders members deterministically by email", () => {
-    expect(migration).toContain("order by m.email_normalized");
+  it("orders members deterministically by contact_id then email", () => {
+    expect(migration).toContain("order by m.contact_id, m.email_normalized");
   });
 });
 
@@ -1726,5 +1725,130 @@ describe("migration safety: no rewrite of deployed provenance migration", () => 
     const migration = read("supabase/migrations/20260822060000_audience_safety_check_rpc.sql");
     expect(migration).toContain("add column if not exists total_scanned");
     expect(migration).toContain("add column if not exists scan_truncated");
+  });
+});
+
+// ── Recovery guards (status/redaction/null members) ───────────────────
+
+describe("recovery guards: status, redaction, null members", () => {
+  const migration = read("supabase/migrations/20260822060000_audience_safety_check_rpc.sql");
+
+  it("returns null for non-preview status runs (draft_linked/expired/launched)", () => {
+    expect(migration).toContain("v_run.status != 'preview'");
+    expect(migration).toContain("return null;  -- draft_linked/expired/launched");
+  });
+
+  it("returns null for redacted runs", () => {
+    expect(migration).toContain("v_run.redacted_at is not null");
+    expect(migration).toContain("return null;  -- redacted runs");
+  });
+
+  it("returns null if any member has null email or null contact_id", () => {
+    expect(migration).toContain("m.email_normalized is null or m.contact_id is null");
+    expect(migration).toContain("return null;  -- members have been partially redacted");
+  });
+});
+
+// ── Recovery exact order and eligible LIMIT ───────────────────────────
+
+describe("recovery reproduces exact original response subset and order", () => {
+  const migration = read("supabase/migrations/20260822060000_audience_safety_check_rpc.sql");
+
+  it("orders all disposition arrays by contact_id with email tiebreaker", () => {
+    // Each subquery must ORDER BY contact_id, email
+    const contactIdOrders = (migration.match(/order by m\.contact_id, m\.email_normalized/g) ?? []).length;
+    // 4 inner subqueries + 4 outer jsonb_agg order-by = at least 4
+    expect(contactIdOrders).toBeGreaterThanOrEqual(4);
+  });
+
+  it("eligible array is LIMIT max_results from spec", () => {
+    expect(migration).toContain("limit v_max_results");
+  });
+
+  it("parses max_results from run spec with bounds", () => {
+    expect(migration).toContain("v_run.spec->>'max_results'");
+    expect(migration).toContain("v_max_results < 1");
+    expect(migration).toContain("v_max_results > 2000");
+  });
+});
+
+// ── Immutability guard extended for new columns ───────────────────────
+
+describe("immutability guard includes total_scanned and scan_truncated", () => {
+  const migration = read("supabase/migrations/20260822060000_audience_safety_check_rpc.sql");
+
+  it("recreates audience_runs_immutable_guard in new migration", () => {
+    expect(migration).toContain("create or replace function public.audience_runs_immutable_guard");
+  });
+
+  it("checks total_scanned is unchanged in FK-null exception", () => {
+    expect(migration).toContain("new.total_scanned     is not distinct from old.total_scanned");
+  });
+
+  it("checks scan_truncated is unchanged in FK-null exception", () => {
+    expect(migration).toContain("new.scan_truncated    is not distinct from old.scan_truncated");
+  });
+
+  it("preserves all existing immutable fields from deployed guard", () => {
+    for (const field of [
+      "raw_prompt", "spec", "spec_hash", "model_id", "model_version",
+      "total_matched", "total_eligible", "total_excluded",
+      "total_ambiguous", "total_duplicate", "total_active_enrollment",
+      "status", "created_at", "launched_at", "launched_spec_hash",
+      "retention_expires_at", "redacted_at",
+    ]) {
+      expect(migration).toContain(`new.${field}`);
+    }
+  });
+
+  it("preserves GUC bypass", () => {
+    expect(migration).toContain("app.audience_provenance_rpc");
+    expect(migration).toContain("return coalesce(new, old)");
+  });
+
+  it("preserves DELETE block", () => {
+    expect(migration).toContain("DELETE not permitted");
+  });
+
+  it("preserves all 4 FK value→NULL predicates", () => {
+    for (const fk of ["user_id", "campaign_id", "interpretation_id", "draft_id"]) {
+      expect(migration).toContain(`old.${fk}`);
+    }
+  });
+
+  it("rewires the trigger", () => {
+    expect(migration).toContain("drop trigger if exists trg_audience_runs_no_update");
+    expect(migration).toContain("create trigger trg_audience_runs_no_update");
+  });
+});
+
+// ── Fixed 409 message ─────────────────────────────────────────────────
+
+describe("non-recoverable 409 message", () => {
+  const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+
+  it("uses a clear non-retry message for consumed interpretations", () => {
+    expect(edgeFn).toContain("already been used and cannot be resubmitted");
+    expect(edgeFn).toContain("Start a new audience search");
+  });
+
+  it("does not say retry for consumed interpretation", () => {
+    // The 409 path should not suggest retry since resubmitting is impossible
+    const consumedBlock = edgeFn.slice(
+      edgeFn.indexOf("interp.consumed_at"),
+      edgeFn.indexOf("interp.expires_at"),
+    );
+    expect(consumedBlock).not.toContain("retry");
+    expect(consumedBlock).not.toContain("Please try again");
+  });
+});
+
+// ── Restored diagnostic error message ─────────────────────────────────
+
+describe("summary arithmetic diagnostic restored", () => {
+  const migration = read("supabase/migrations/20260822060000_audience_safety_check_rpc.sql");
+
+  it("includes 5-parameter diagnostic in arithmetic mismatch exception", () => {
+    expect(migration).toContain("total_matched (%) must equal eligible (%) + excluded (%) + ambiguous (%) + active_enrollment (%)");
   });
 });

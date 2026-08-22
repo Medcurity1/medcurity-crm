@@ -219,7 +219,7 @@ describe("AI audience provenance", () => {
     expect(edgeFn).toMatch(/interpretation_id/);
     // The resolve function checks interpretation ownership
     expect(edgeFn).toContain("Interpretation belongs to a different user");
-    expect(edgeFn).toContain("Interpretation already consumed");
+    expect(edgeFn).toContain("already been used and cannot be resubmitted");
     expect(edgeFn).toContain("Interpretation has expired");
   });
 
