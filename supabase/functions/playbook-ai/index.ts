@@ -56,6 +56,7 @@ import {
   piiRejectionMessage,
   canonicalizeStateCode,
   PRIVACY_SCREEN_VERSION,
+  isStagingProject,
 } from "../_shared/audience-spec.ts";
 
 const corsHeaders = {
@@ -1417,12 +1418,35 @@ async function expireAudienceRun(
   return { success: true };
 }
 
+/**
+ * Atomically discard an AI audience draft: expire the run, clear
+ * draft_id, and delete the draft in one transaction via the
+ * discard_ai_audience_draft RPC.  Owner-authenticated.
+ */
+async function discardAiAudienceDraft(
+  runId: string | null,
+  draftId: string,
+  userId: string,
+): Promise<Record<string, unknown>> {
+  if (!draftId || typeof draftId !== "string") throw new AudienceActionError("draft_id is required", 400);
+
+  const { error } = await svc.rpc("discard_ai_audience_draft", {
+    p_run_id: runId || null,
+    p_draft_id: draftId,
+    p_user_id: userId,
+  });
+  if (error) throw new Error("Failed to discard AI audience draft: " + error.message);
+
+  return { success: true };
+}
+
 const REP_ELIGIBLE_AI_ACTIONS = new Set([
   "interpret-audience",
   "resolve-audience",
   "generate-audience-draft",
   "link-audience-draft",
   "expire-audience-run",
+  "discard-ai-audience-draft",
 ]);
 
 Deno.serve(async (req) => {
@@ -1436,6 +1460,11 @@ Deno.serve(async (req) => {
     // Per-action auth: audience actions open to all authenticated,
     // everything else stays admin/service-role only.
     if (REP_ELIGIBLE_AI_ACTIONS.has(action)) {
+      // Staging-only enforcement: audience actions fail closed on
+      // non-Staging projects. Non-audience actions are unaffected.
+      if (!isStagingProject(SUPABASE_URL)) {
+        return json({ error: "AI audience features are only available on Staging" }, 403);
+      }
       if (!svcCaller) {
         const uid = await callerUserId(auth);
         if (!uid) return json({ error: "Sign in required" }, 401);
@@ -1479,6 +1508,11 @@ Deno.serve(async (req) => {
       const uid = await callerUserId(auth);
       if (!uid) return json({ error: "Sign in required" }, 401);
       return json(await expireAudienceRun(body.run_id ?? "", uid));
+    }
+    if (action === "discard-ai-audience-draft") {
+      const uid = await callerUserId(auth);
+      if (!uid) return json({ error: "Sign in required" }, 401);
+      return json(await discardAiAudienceDraft(body.run_id ?? null, body.draft_id ?? "", uid));
     }
     if (action === "interpret-audience") {
       const uid = await callerUserId(auth);

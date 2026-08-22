@@ -210,15 +210,70 @@ comment on table public.campaign_audience_run_members is
 --
 -- INSERT-only semantics at DB level.  RPCs bypass via transaction-scoped
 -- GUC (SET LOCAL app.audience_provenance_rpc = 'true') — race-safe.
+--
+-- FK ON DELETE SET NULL updates are explicitly permitted: when a
+-- referenced row (user_profiles, campaigns, interpretations, drafts,
+-- contacts, accounts) is deleted, Postgres must be able to NULL the FK
+-- column without being blocked by the immutability trigger.  The guard
+-- allows an UPDATE ONLY when every content/lifecycle field is unchanged,
+-- EACH FK column is individually either unchanged or exactly value→NULL
+-- (never NULL→value or value→different-value), and at least one FK is
+-- the latter.
+-- DELETE on the provenance row itself is always rejected (except via GUC).
 
 create or replace function public.audience_runs_immutable_guard()
 returns trigger
 language plpgsql
 as $$
 begin
+  -- RPC bypass (status transitions, redaction, discard)
   if current_setting('app.audience_provenance_rpc', true) = 'true' then
     return coalesce(new, old);
   end if;
+
+  -- DELETE is never allowed outside RPCs
+  if tg_op = 'DELETE' then
+    raise exception 'campaign_audience_runs is immutable — DELETE not permitted';
+  end if;
+
+  -- Allow FK ON DELETE SET NULL: permit update ONLY when every non-FK
+  -- field is unchanged, EACH FK is individually either unchanged or
+  -- exactly value→NULL (never NULL→value or value→different-value),
+  -- and at least one FK is the latter.
+  if new.id                   is not distinct from old.id
+    and new.raw_prompt        is not distinct from old.raw_prompt
+    and new.spec              is not distinct from old.spec
+    and new.spec_hash         is not distinct from old.spec_hash
+    and new.model_id          is not distinct from old.model_id
+    and new.model_version     is not distinct from old.model_version
+    and new.total_matched     is not distinct from old.total_matched
+    and new.total_eligible    is not distinct from old.total_eligible
+    and new.total_excluded    is not distinct from old.total_excluded
+    and new.total_ambiguous   is not distinct from old.total_ambiguous
+    and new.total_duplicate   is not distinct from old.total_duplicate
+    and new.total_active_enrollment is not distinct from old.total_active_enrollment
+    and new.status            is not distinct from old.status
+    and new.created_at        is not distinct from old.created_at
+    and new.launched_at       is not distinct from old.launched_at
+    and new.launched_spec_hash is not distinct from old.launched_spec_hash
+    and new.retention_expires_at is not distinct from old.retention_expires_at
+    and new.redacted_at       is not distinct from old.redacted_at
+    -- Each FK: unchanged OR exactly value→NULL (no mixed mutation)
+    and (new.user_id             is not distinct from old.user_id             or (old.user_id             is not null and new.user_id             is null))
+    and (new.campaign_id         is not distinct from old.campaign_id         or (old.campaign_id         is not null and new.campaign_id         is null))
+    and (new.interpretation_id   is not distinct from old.interpretation_id   or (old.interpretation_id   is not null and new.interpretation_id   is null))
+    and (new.draft_id            is not distinct from old.draft_id            or (old.draft_id            is not null and new.draft_id            is null))
+  then
+    -- At least one FK must actually be transitioning value→NULL
+    if (old.user_id            is not null and new.user_id            is null)
+      or (old.campaign_id      is not null and new.campaign_id        is null)
+      or (old.interpretation_id is not null and new.interpretation_id is null)
+      or (old.draft_id         is not null and new.draft_id           is null)
+    then
+      return new;
+    end if;
+  end if;
+
   raise exception 'campaign_audience_runs is immutable — use the provided RPCs for status transitions and redaction';
 end;
 $$;
@@ -233,9 +288,39 @@ returns trigger
 language plpgsql
 as $$
 begin
+  -- RPC bypass
   if current_setting('app.audience_provenance_rpc', true) = 'true' then
     return coalesce(new, old);
   end if;
+
+  -- DELETE is never allowed outside RPCs
+  if tg_op = 'DELETE' then
+    raise exception 'campaign_audience_run_members is immutable — DELETE not permitted';
+  end if;
+
+  -- Allow FK ON DELETE SET NULL for contact_id / account_id only.
+  -- Each FK: unchanged OR exactly value→NULL. At least one is the latter.
+  if new.id               is not distinct from old.id
+    and new.run_id        is not distinct from old.run_id
+    and new.email_normalized is not distinct from old.email_normalized
+    and new.disposition   is not distinct from old.disposition
+    and new.reason_codes  is not distinct from old.reason_codes
+    and new.snapshot_industry_category is not distinct from old.snapshot_industry_category
+    and new.snapshot_project_segment is not distinct from old.snapshot_project_segment
+    and new.snapshot_state is not distinct from old.snapshot_state
+    and new.snapshot_customer_status is not distinct from old.snapshot_customer_status
+    and new.snapshot_account_type is not distinct from old.snapshot_account_type
+    and new.snapshot_account_name is not distinct from old.snapshot_account_name
+    and (new.contact_id is not distinct from old.contact_id or (old.contact_id is not null and new.contact_id is null))
+    and (new.account_id is not distinct from old.account_id or (old.account_id is not null and new.account_id is null))
+  then
+    if (old.contact_id is not null and new.contact_id is null)
+      or (old.account_id is not null and new.account_id is null)
+    then
+      return new;
+    end if;
+  end if;
+
   raise exception 'campaign_audience_run_members is immutable — no UPDATE or DELETE permitted';
 end;
 $$;
@@ -491,7 +576,10 @@ grant execute on function public.create_audience_run_with_members(jsonb, jsonb, 
 
 -- ── 7. RPC: audience_run_set_status ──────────────────────────────────────
 
+-- Drop both old 4-arg and current 5-arg signatures before create
+-- so migration is rerun-safe.
 drop function if exists public.audience_run_set_status(uuid, text, uuid, text);
+drop function if exists public.audience_run_set_status(uuid, text, uuid, uuid, text);
 
 create or replace function public.audience_run_set_status(
   p_run_id uuid,
@@ -662,7 +750,86 @@ create index if not exists idx_campaign_enrollments_email_lower_active
   on public.campaign_enrollments(lower(trim(email)))
   where status = 'active';
 
--- ── 11. Retention scheduling (NOT done by this migration) ────────────────
+-- ── 11. RPC: discard_ai_audience_draft ───────────────────────────────────
+--
+-- Atomic: locks and verifies run+draft ownership/matching, expires the
+-- run, clears draft_id, deletes draft in one transaction.  Avoids the
+-- ON DELETE SET NULL trigger-vs-immutability race where deleting the
+-- draft fires an UPDATE on campaign_audience_runs before a separate
+-- expire call can set the GUC bypass.  service_role only.
+
+create or replace function public.discard_ai_audience_draft(
+  p_run_id   uuid,
+  p_draft_id uuid,
+  p_user_id  uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_run_status text;
+  v_run_user   uuid;
+  v_run_draft  uuid;
+  v_draft_user uuid;
+begin
+  if p_user_id is null then
+    raise exception 'user_id is required';
+  end if;
+
+  -- Lock run first
+  if p_run_id is not null then
+    select status, user_id, draft_id
+      into v_run_status, v_run_user, v_run_draft
+      from public.campaign_audience_runs
+      where id = p_run_id
+      for update;
+
+    if found then
+      if v_run_user is distinct from p_user_id then
+        raise exception 'You do not own this audience run';
+      end if;
+      if v_run_draft is not null and p_draft_id is not null and v_run_draft is distinct from p_draft_id then
+        raise exception 'Run draft_id does not match the draft being discarded';
+      end if;
+
+      -- Bypass immutability trigger for this transaction
+      set local app.audience_provenance_rpc = 'true';
+
+      -- Expire run and clear draft_id atomically
+      if v_run_status in ('preview', 'draft_linked') then
+        update public.campaign_audience_runs
+        set status = 'expired',
+            draft_id = null
+        where id = p_run_id;
+      end if;
+    end if;
+  end if;
+
+  -- Delete draft (safe even if run was not found/already expired)
+  if p_draft_id is not null then
+    select user_id into v_draft_user
+      from public.campaign_drafts
+      where id = p_draft_id
+      for update;
+
+    if found then
+      if v_draft_user is distinct from p_user_id then
+        raise exception 'You do not own this draft';
+      end if;
+      delete from public.campaign_drafts where id = p_draft_id;
+    end if;
+  end if;
+end;
+$$;
+
+revoke all on function public.discard_ai_audience_draft(uuid, uuid, uuid)
+  from public, anon, authenticated;
+grant execute on function public.discard_ai_audience_draft(uuid, uuid, uuid)
+  to service_role;
+
+-- ── 12. Retention scheduling (NOT done by this migration) ────────────────
 --
 -- The redaction/cleanup RPCs (audience_run_redact_expired,
 -- audience_interpretation_cleanup) are service-role-only and ready to call.

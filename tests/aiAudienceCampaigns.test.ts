@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
-import { canonicalizeStateCode } from "../supabase/functions/_shared/audience-spec";
+import { canonicalizeStateCode, isStagingProject } from "../supabase/functions/_shared/audience-spec";
 
 const read = (relative: string) =>
   readFileSync(path.resolve(__dirname, "..", relative), "utf8");
@@ -1032,19 +1032,25 @@ describe("audit 4 fix 7: discard lifecycle expires audience run", () => {
     expect(match![1]).toContain('"expire-audience-run"');
   });
 
-  it("discardDraft calls expireRun when banner has aiAudience provenance", () => {
+  it("discardDraft uses transactional discard RPC for AI-linked drafts", () => {
     const wizard = read("src/features/playbook/CampaignWizard.tsx");
     const discardBlock = wizard.slice(
       wizard.indexOf("function discardDraft"),
       wizard.indexOf("function reset"),
     );
-    expect(discardBlock).toContain("expireRun.mutate");
-    expect(discardBlock).toContain("draftBanner.state.aiAudience?.runId");
+    expect(discardBlock).toContain("discardAiDraft.mutate");
+    expect(discardBlock).toContain("draftBanner.state.aiAudience");
   });
 
-  it("expire failure warns but does not resurrect the draft", () => {
+  it("discard failure shows error and keeps banner visible", () => {
     const wizard = read("src/features/playbook/CampaignWizard.tsx");
-    expect(wizard).toContain("audience run could not be expired");
+    const discardBlock = wizard.slice(
+      wizard.indexOf("function discardDraft"),
+      wizard.indexOf("function reset"),
+    );
+    // AI path: banner only hidden on success, not before mutation
+    expect(discardBlock).toContain("onSuccess: () => setDraftBanner(null)");
+    expect(discardBlock).toContain("Could not discard AI draft");
   });
 });
 
@@ -1262,5 +1268,244 @@ describe("review 6: v_marketing_suppression is authoritative", () => {
     expect(ambiguityCheck).toBeGreaterThan(suppressedCheck);
     // The isSuppressed branch sets "excluded" unconditionally
     expect(applyBlock).toMatch(/if \(isSuppressed \|\| hasDirectExclusion\) \{\s*m\.disposition = "excluded"/);
+  });
+});
+
+// ── Final audit: P0-1 recipient leak, P0-2 transactional discard, P1 staging-only ──
+
+describe("final audit P0-1: AI recipients cleared on method switch", () => {
+  it("every method switch handler clears recipients", () => {
+    const wizard = read("src/features/playbook/CampaignWizard.tsx");
+    // Count setRecipients([]) calls in method handlers (choose/template/ai/ask-ai + back button)
+    const handlers = wizard.slice(
+      wizard.indexOf("setSequenceAttempted(false);"),
+      wizard.indexOf("</button>", wizard.indexOf("setSequenceAttempted(false);") + 300),
+    );
+    const clearCalls = (handlers.match(/setRecipients\(\[\]\)/g) ?? []).length;
+    // At least 4: choose, template, ai, ask-ai handlers
+    expect(clearCalls).toBeGreaterThanOrEqual(4);
+  });
+
+  it("back button from AI sequence clears recipients and aiAudienceResult", () => {
+    const wizard = read("src/features/playbook/CampaignWizard.tsx");
+    expect(wizard).toContain("setCampaign(null); setFlow(\"choose\"); setCustomSequence(false); setAiAudienceResult(null); setRecipients([])");
+  });
+
+  it("doLaunch has immutable guard rejecting AI audience provenance", () => {
+    const wizard = read("src/features/playbook/CampaignWizard.tsx");
+    const launchBlock = wizard.slice(
+      wizard.indexOf("function doLaunch"),
+      wizard.indexOf("const shared = {"),
+    );
+    expect(launchBlock).toContain("aiAudienceResult");
+    expect(launchBlock).toContain("AI audience campaigns can only be saved as drafts");
+    expect(launchBlock).toContain("return;");
+  });
+});
+
+describe("final audit P0-2: transactional discard_ai_audience_draft", () => {
+  it("RPC exists in migration with correct signature", () => {
+    const migration = read("supabase/migrations/20260822020000_campaign_audience_provenance.sql");
+    expect(migration).toContain("discard_ai_audience_draft");
+    expect(migration).toMatch(/create or replace function public\.discard_ai_audience_draft\(\s*p_run_id\s+uuid/);
+    expect(migration).toContain("p_draft_id uuid");
+    expect(migration).toContain("p_user_id  uuid");
+  });
+
+  it("RPC sets GUC bypass, expires run, clears draft_id, deletes draft atomically", () => {
+    const migration = read("supabase/migrations/20260822020000_campaign_audience_provenance.sql");
+    const rpcBlock = migration.slice(
+      migration.indexOf("function public.discard_ai_audience_draft"),
+      migration.indexOf("revoke all on function public.discard_ai_audience_draft"),
+    );
+    expect(rpcBlock).toContain("set local app.audience_provenance_rpc");
+    expect(rpcBlock).toContain("status = 'expired'");
+    expect(rpcBlock).toContain("draft_id = null");
+    expect(rpcBlock).toContain("delete from public.campaign_drafts");
+    expect(rpcBlock).toContain("for update");
+  });
+
+  it("Edge action discard-ai-audience-draft exists and is rep-eligible", () => {
+    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+    expect(edgeFn).toContain('"discard-ai-audience-draft"');
+    const match = edgeFn.match(/REP_ELIGIBLE_AI_ACTIONS\s*=\s*new Set\(\[([\s\S]*?)\]\)/);
+    expect(match![1]).toContain('"discard-ai-audience-draft"');
+  });
+
+  it("frontend uses transactional discard for AI-linked drafts", () => {
+    const wizard = read("src/features/playbook/CampaignWizard.tsx");
+    expect(wizard).toContain("discardAiDraft.mutate");
+    expect(wizard).toContain("useDiscardAiAudienceDraft");
+  });
+});
+
+describe("final audit P1: Staging-only enforcement", () => {
+  it("isStagingProject helper checks for known project ref", () => {
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("STAGING_PROJECT_REF");
+    expect(spec).toContain("baekcgdyjedgxmejbytc");
+    expect(spec).toContain("export function isStagingProject");
+  });
+
+  it("backend audience actions fail closed on non-Staging project", () => {
+    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+    expect(edgeFn).toContain("isStagingProject(SUPABASE_URL)");
+    expect(edgeFn).toContain("AI audience features are only available on Staging");
+  });
+
+  it("non-audience actions are unaffected by Staging check", () => {
+    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+    // The Staging check is inside the REP_ELIGIBLE block, not the admin block
+    const adminBlock = edgeFn.slice(
+      edgeFn.indexOf("} else {", edgeFn.indexOf("REP_ELIGIBLE_AI_ACTIONS.has(action)")),
+      edgeFn.indexOf("if (action === \"generate-ideas\")"),
+    );
+    expect(adminBlock).not.toContain("isStagingProject");
+  });
+
+  it("frontend AI_AUDIENCE_ENABLED checks hostname", () => {
+    const wizard = read("src/features/playbook/CampaignWizard.tsx");
+    expect(wizard).toContain("AI_AUDIENCE_ENABLED");
+    expect(wizard).toContain("staging.crm.medcurity.com");
+    expect(wizard).toContain("localhost");
+  });
+
+  it("Ask AI method filtered out when AI_AUDIENCE_ENABLED is false", () => {
+    const wizard = read("src/features/playbook/CampaignWizard.tsx");
+    expect(wizard).toContain('id !== "ask-ai" || AI_AUDIENCE_ENABLED');
+  });
+
+  it("production host would be rejected (behavioral)", () => {
+    expect(isStagingProject("https://baekcgdyjedgxmejbytc.supabase.co")).toBe(true);
+    expect(isStagingProject("https://some-production-ref.supabase.co")).toBe(false);
+    expect(isStagingProject(undefined)).toBe(false);
+    expect(isStagingProject("")).toBe(false);
+  });
+
+  it("migration drops both old 4-arg and current 5-arg status RPC before create", () => {
+    const migration = read("supabase/migrations/20260822020000_campaign_audience_provenance.sql");
+    expect(migration).toContain("drop function if exists public.audience_run_set_status(uuid, text, uuid, text)");
+    expect(migration).toContain("drop function if exists public.audience_run_set_status(uuid, text, uuid, uuid, text)");
+  });
+});
+
+// ── Immutability triggers: FK ON DELETE SET NULL allowance ─────────────
+
+describe("immutability triggers allow FK ON DELETE SET NULL", () => {
+  const migration = read("supabase/migrations/20260822020000_campaign_audience_provenance.sql");
+  const runTrigger = migration.slice(
+    migration.indexOf("create or replace function public.audience_runs_immutable_guard"),
+    migration.indexOf("drop trigger if exists trg_audience_runs_no_update"),
+  );
+  const memberTrigger = migration.slice(
+    migration.indexOf("create or replace function public.audience_members_immutable_guard"),
+    migration.indexOf("drop trigger if exists trg_audience_members_no_update"),
+  );
+
+  // ── Runs trigger ──
+
+  it("run trigger still blocks DELETE outside GUC", () => {
+    expect(runTrigger).toContain("DELETE not permitted");
+    expect(runTrigger).toContain("tg_op = 'DELETE'");
+  });
+
+  it("run trigger still allows RPC GUC bypass", () => {
+    expect(runTrigger).toContain("app.audience_provenance_rpc");
+    expect(runTrigger).toContain("return coalesce(new, old)");
+  });
+
+  it("run trigger checks all non-FK content fields are unchanged", () => {
+    for (const field of [
+      "spec", "spec_hash", "model_id", "status",
+      "total_matched", "total_eligible", "total_excluded",
+      "total_ambiguous", "total_duplicate", "total_active_enrollment",
+      "created_at", "launched_at", "retention_expires_at", "redacted_at",
+    ]) {
+      expect(runTrigger).toContain(`new.${field}`);
+    }
+  });
+
+  it("run trigger permits user_id/campaign_id/interpretation_id/draft_id value→NULL", () => {
+    for (const fk of ["user_id", "campaign_id", "interpretation_id", "draft_id"]) {
+      expect(runTrigger).toContain(`old.${fk}`);
+      // Pattern: old.X is not null and new.X is null
+      expect(runTrigger).toMatch(new RegExp(`old\\.${fk}\\s+is not null and new\\.${fk}\\s+is null`));
+    }
+  });
+
+  it("run trigger rejects non-FK mutations outside GUC", () => {
+    expect(runTrigger).toContain("use the provided RPCs");
+  });
+
+  // ── Members trigger ──
+
+  it("member trigger still blocks DELETE outside GUC", () => {
+    expect(memberTrigger).toContain("DELETE not permitted");
+  });
+
+  it("member trigger checks all non-FK fields are unchanged", () => {
+    for (const field of [
+      "run_id", "email_normalized", "disposition", "reason_codes",
+      "snapshot_industry_category", "snapshot_project_segment", "snapshot_state",
+      "snapshot_customer_status", "snapshot_account_type", "snapshot_account_name",
+    ]) {
+      expect(memberTrigger).toContain(`new.${field}`);
+    }
+  });
+
+  it("member trigger permits contact_id/account_id value→NULL only", () => {
+    for (const fk of ["contact_id", "account_id"]) {
+      expect(memberTrigger).toMatch(new RegExp(`old\\.${fk} is not null and new\\.${fk} is null`));
+    }
+  });
+
+  it("member trigger rejects content/disposition changes", () => {
+    expect(memberTrigger).toContain("no UPDATE or DELETE permitted");
+  });
+
+  // ── Per-FK unchanged-or-null predicates (no mixed mutation loophole) ──
+
+  it("run trigger: each FK has its own unchanged-OR-value→NULL predicate in the outer AND", () => {
+    // Each FK must appear as: (new.X is not distinct from old.X or (old.X is not null and new.X is null))
+    // inside the main IF block's AND chain, preventing any FK from changing
+    // NULL→value or value→different-value while another FK is being nulled.
+    for (const fk of ["user_id", "campaign_id", "interpretation_id", "draft_id"]) {
+      const pattern = new RegExp(
+        `\\(new\\.${fk}\\s+is not distinct from old\\.${fk}\\s+or \\(old\\.${fk}\\s+is not null and new\\.${fk}\\s+is null\\)\\)`,
+      );
+      expect(runTrigger).toMatch(pattern);
+    }
+  });
+
+  it("member trigger: each FK has its own unchanged-OR-value→NULL predicate in the outer AND", () => {
+    for (const fk of ["contact_id", "account_id"]) {
+      const pattern = new RegExp(
+        `\\(new\\.${fk} is not distinct from old\\.${fk} or \\(old\\.${fk} is not null and new\\.${fk} is null\\)\\)`,
+      );
+      expect(memberTrigger).toMatch(pattern);
+    }
+  });
+
+  it("run trigger: no mixed mutation loophole — FK predicates are AND-joined not OR-only", () => {
+    // The per-FK predicates must be AND-joined in the outer IF (not an
+    // inner OR-only block that would allow one FK to change arbitrarily
+    // while another is nulled).
+    // Verify all four appear as "and (...)" clauses
+    const andClauseCount = (runTrigger.match(/and \(new\.(user_id|campaign_id|interpretation_id|draft_id)\s+is not distinct from/g) ?? []).length;
+    expect(andClauseCount).toBe(4);
+  });
+
+  it("member trigger: no mixed mutation loophole — FK predicates are AND-joined", () => {
+    const andClauseCount = (memberTrigger.match(/and \(new\.(contact_id|account_id) is not distinct from/g) ?? []).length;
+    expect(andClauseCount).toBe(2);
+  });
+
+  it("trigger never allows NULL→value or value→different-value on FK columns", () => {
+    // The per-FK predicate is: unchanged OR (old not null AND new null).
+    // "unchanged" via IS NOT DISTINCT FROM covers NULL=NULL and val=val.
+    // The only mutation path is old-non-null→new-null.
+    // No acceptance path exists for new.X is not null outside GUC.
+    expect(runTrigger).not.toMatch(/new\.(user_id|campaign_id|interpretation_id|draft_id)\s+is not null.*return new/);
+    expect(memberTrigger).not.toMatch(/new\.(contact_id|account_id)\s+is not null.*return new/);
   });
 });

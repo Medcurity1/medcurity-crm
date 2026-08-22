@@ -855,6 +855,21 @@ export function useExpireAudienceRun() {
 }
 
 /**
+ * Atomically discard an AI audience draft: expire the run, clear
+ * draft_id, delete draft in one transaction. Owner-authenticated.
+ */
+export function useDiscardAiAudienceDraft() {
+  return useMutation({
+    mutationFn: (p: { run_id: string | null; draft_id: string }) =>
+      invokeAI<{ success: boolean }>({
+        action: "discard-ai-audience-draft",
+        run_id: p.run_id,
+        draft_id: p.draft_id,
+      }),
+  });
+}
+
+/**
  * Interpret a plain-English audience brief into a strict AudienceSpec v1.
  * Returns an interpretation_id that must be passed to resolve-audience.
  * Rejects briefs containing PII (emails, phone numbers, SSNs).

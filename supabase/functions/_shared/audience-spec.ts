@@ -85,6 +85,26 @@ export interface AudienceSpecV1 {
   unsupported_criteria?: string[];
 }
 
+// ── Staging-only enforcement ─────────────────────────────────────────────
+
+/** Known Staging Supabase project ref. Audience actions fail closed on any
+ *  other project so accidental Production promotion cannot serve AI
+ *  audience features. Non-audience actions are unaffected. */
+export const STAGING_PROJECT_REF = "baekcgdyjedgxmejbytc";
+
+/** Allowed frontend hostnames for Ask AI visibility. */
+export const AI_AUDIENCE_ALLOWED_HOSTS = [
+  "staging.crm.medcurity.com",
+  "localhost",
+  "127.0.0.1",
+] as const;
+
+/** Returns true if the SUPABASE_URL belongs to the known Staging project. */
+export function isStagingProject(supabaseUrl: string | undefined): boolean {
+  if (!supabaseUrl) return false;
+  return supabaseUrl.includes(STAGING_PROJECT_REF);
+}
+
 /** Hard ceiling for max_results. */
 export const MAX_RESULTS_HARD_CAP = 2000;
 /** Default max_results when not specified. */

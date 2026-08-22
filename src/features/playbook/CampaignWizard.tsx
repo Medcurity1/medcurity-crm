@@ -63,10 +63,17 @@ import {
   useGenerateCampaign, useSuggestCampaign, useRegenerateEmail, useEmailAccounts, useLaunchCampaign,
   useInboxHealth, useSmartleadStatus, useActiveUsers, useCampaignTemplates, smartleadUrl,
   fetchLatestCampaignDraft, saveCampaignDraft, deleteCampaignDraft,
-  useGenerateAudienceDraft, useLinkAudienceDraft, useExpireAudienceRun,
+  useGenerateAudienceDraft, useLinkAudienceDraft, useDiscardAiAudienceDraft,
   type GeneratedCampaign, type Recipient, type ActiveEnrollmentEntry,
 } from "./api";
 import { AiAudienceFlow, type AiAudienceResult } from "./AiAudienceFlow";
+
+/** Ask AI is Staging-only: render only on staging.crm.medcurity.com or localhost. */
+const AI_AUDIENCE_ENABLED = (() => {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname;
+  return host === "staging.crm.medcurity.com" || host === "localhost" || host === "127.0.0.1";
+})();
 
 type Step = 1 | 2 | 3;
 const MAX_EMAILS = 7;
@@ -354,7 +361,7 @@ export function CampaignWizard({
   const gen = useGenerateCampaign();
   const genAudienceDraft = useGenerateAudienceDraft();
   const linkDraft = useLinkAudienceDraft();
-  const expireRun = useExpireAudienceRun();
+  const discardAiDraft = useDiscardAiAudienceDraft();
   // Tracks whether linking has been attempted for the current draft save
   // to prevent autosave from repeatedly re-linking.
   const aiDraftLinkedRef = useRef(false);
@@ -681,15 +688,18 @@ export function CampaignWizard({
   function discardDraft() {
     if (!draftBanner) return;
     const id = draftBanner.id;
-    const runId = draftBanner.state.aiAudience?.runId;
-    setDraftBanner(null);
-    deleteCampaignDraft(id).catch(() => {});
-    // Expire the linked audience run when explicitly discarding an AI draft.
-    // Failure warns but does not resurrect the draft (best-effort).
-    if (runId) {
-      expireRun.mutate({ run_id: runId }, {
-        onError: (err) => toast.warning("Draft discarded, but the audience run could not be expired: " + (err as Error).message),
+    const runId = draftBanner.state.aiAudience?.runId ?? null;
+    if (runId || draftBanner.state.aiAudience) {
+      // AI-linked draft: use transactional RPC (expire run + clear FK +
+      // delete draft atomically). Only hide banner after success.
+      discardAiDraft.mutate({ run_id: runId, draft_id: id }, {
+        onSuccess: () => setDraftBanner(null),
+        onError: (err) => toast.error("Could not discard AI draft: " + (err as Error).message),
       });
+    } else {
+      // Non-AI draft: simple delete, always hide banner
+      setDraftBanner(null);
+      deleteCampaignDraft(id).catch(() => {});
     }
   }
 
@@ -874,6 +884,14 @@ export function CampaignWizard({
   }
 
   function doLaunch() {
+    // P0 immutable safety: AI audience provenance must NEVER launch through
+    // Smartlead, even if UI state is somehow inconsistent (e.g. resumed AI
+    // draft that lost its aiAudienceResult guard). The AI path is Save Draft
+    // only; any launch attempt with AI provenance is a bug.
+    if (aiAudienceResult) {
+      toast.error("AI audience campaigns can only be saved as drafts. Use Save draft instead.");
+      return;
+    }
     if (smartleadDisabled) {
       toast.error("Reconnect Smartlead before launching this campaign.");
       return;
@@ -1076,7 +1094,8 @@ export function CampaignWizard({
                   {BUILD_START_METHODS.filter(({ id }) =>
                     // "Draft with AI" (id="ai") uses admin-only generate-campaign;
                     // hide for non-admins. Ask AI uses the rep-safe path.
-                    id !== "ai" || isAdmin
+                    // Ask AI (id="ask-ai") is Staging-only.
+                    (id !== "ai" || isAdmin) && (id !== "ask-ai" || AI_AUDIENCE_ENABLED)
                   ).map(({ id, label, description, Icon }) => {
                     const selected = id === "ask-ai"
                       ? flow === "ask-ai"
@@ -1099,7 +1118,8 @@ export function CampaignWizard({
                             setFlow("ask-ai");
                             setEditingSequence(false);
                             setAiAudienceResult(null);
-                            // AI audience campaigns save as draft only (no autoStart)
+                            setRecipients([]);
+                            setCampaign(null);
                             setAutoStart(false);
                           } else if (id === "choose") {
                             setFlow("template");
@@ -1107,8 +1127,10 @@ export function CampaignWizard({
                             setCustomSequence(true);
                             setAutoStart(true);
                             setEditingSequence(false);
-                            // Clear stale AI audience state when switching methods
+                            // P0: clear ALL AI audience state + AI-derived recipients
                             setAiAudienceResult(null);
+                            setRecipients([]);
+                            setCampaign(null);
                           } else if (id === "template") {
                             setFlow("template");
                             setCustomSequence(false);
@@ -1116,11 +1138,15 @@ export function CampaignWizard({
                             setEditingSequence(false);
                             setTemplateSteps(templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : []);
                             setAiAudienceResult(null);
+                            setRecipients([]);
+                            setCampaign(null);
                           } else {
                             setFlow("ai");
                             setAutoStart(true);
                             setEditingSequence(false);
                             setAiAudienceResult(null);
+                            setRecipients([]);
+                            setCampaign(null);
                           }
                         }}
                       >
@@ -1414,7 +1440,7 @@ export function CampaignWizard({
               )}
 
               <div className="flex justify-between pt-2">
-                <Button variant="ghost" onClick={() => { setCampaign(null); setFlow("choose"); setCustomSequence(false); setAiAudienceResult(null); }}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+                <Button variant="ghost" onClick={() => { setCampaign(null); setFlow("choose"); setCustomSequence(false); setAiAudienceResult(null); setRecipients([]); }}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
                 <button
                   type="button"
                   className="camp-btn-primary"
