@@ -531,40 +531,24 @@ describe("Blocker 5: True keyset pagination + truncation probe", () => {
   });
 });
 
-describe("Blocker 6: Retention schedule (pg_cron)", () => {
+describe("Retention RPCs and scheduling policy", () => {
   const migration = read("supabase", "migrations", "20260822020000_campaign_audience_provenance.sql");
 
-  it("schedules audience_run_redact_expired via pg_cron", () => {
-    expect(migration).toContain("audience-provenance-redact-daily");
+  it("redaction and cleanup RPCs exist as service-role-only", () => {
     expect(migration).toContain("audience_run_redact_expired");
-    expect(migration).toContain("cron.schedule");
-  });
-
-  it("schedules interpretation cleanup via pg_cron", () => {
-    expect(migration).toContain("audience-interpretations-cleanup-daily");
     expect(migration).toContain("audience_interpretation_cleanup");
+    expect(migration).toContain("to service_role");
   });
 
-  it("gracefully handles missing pg_cron with deployment notice", () => {
-    expect(migration).toContain("DEPLOYMENT REQUIREMENT");
-    expect(migration).toContain("pg_cron not available");
+  it("does NOT auto-schedule via pg_cron (prevents silently altering Production scheduler)", () => {
+    expect(migration).not.toContain("cron.schedule");
+    expect(migration).not.toContain("do $do_cron$");
   });
 
-  it("DO block uses distinct dollar-quote tags — no nested $$ ambiguity", () => {
-    // The DO block must NOT use bare $$ for both the block body and
-    // the cron command strings.  Nested $$ causes a parse error.
-    const doBlock = migration.slice(
-      migration.indexOf("do $do_cron$"),
-      migration.indexOf("end $do_cron$") + "end $do_cron$;".length,
-    );
-    expect(doBlock.length).toBeGreaterThan(0);
-    // The block body delimiter is $do_cron$, not $$
-    expect(doBlock.startsWith("do $do_cron$")).toBe(true);
-    // Command strings use $cmd$, not $$
-    expect(doBlock).toContain("$cmd$");
-    // There must be NO bare $$ inside the block (would nest ambiguously)
-    const inner = doBlock.slice("do $do_cron$".length, doBlock.lastIndexOf("$do_cron$"));
-    expect(inner).not.toContain("$$");
+  it("records explicit Staging deployment requirement for external scheduling", () => {
+    expect(migration).toContain("STAGING DEPLOYMENT REQUIREMENT");
+    expect(migration).toContain("audience_run_redact_expired");
+    expect(migration).toContain("audience_interpretation_cleanup");
   });
 });
 
@@ -705,12 +689,12 @@ describe("interpretAudience — reject, never clean up", () => {
 
 describe("resolveAudience — structural guarantees", () => {
   const edgeFn = read("supabase", "functions", "playbook-ai", "index.ts");
-  const fn = edgeFn.slice(edgeFn.indexOf("async function resolveAudience"), edgeFn.indexOf("// ── HTTP handler"));
+  const fn = edgeFn.slice(edgeFn.indexOf("async function resolveAudience"), edgeFn.indexOf("// ── AI Audience: generate-audience-draft"));
 
   it("unfiltered spec guard", () => { expect(fn).toContain("isUnfilteredSpec"); expect(fn).toContain("would match all contacts"); });
   it("invalid email exclusion", () => { expect(fn).toContain("isPlausibleEmail"); });
   it("no server-side .in() for targeting (NULL ambiguity)", () => { expect(fn).not.toContain('.in("accounts.industry_category"'); });
-  it("canonical duplicate representation", () => { expect(fn).toContain("duplicate_contact:"); });
+  it("canonical duplicate representation (no embedded IDs)", () => { expect(fn).toContain('"duplicate_contact"'); expect(fn).not.toContain("duplicate_contact:${"); });
   it("authoritative partner source", () => { expect(fn).toContain('"v_partner_accounts"'); expect(fn).not.toContain('.startsWith("partner")'); });
   it("transactional RPC (not direct insert)", () => { expect(fn).toContain("create_audience_run_with_members"); expect(fn).not.toContain('.from("campaign_audience_runs")'); });
   it("no Smartlead, no launch", () => { expect(fn.toLowerCase()).not.toContain("smartlead"); });

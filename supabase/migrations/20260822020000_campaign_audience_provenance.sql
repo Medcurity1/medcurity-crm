@@ -18,8 +18,8 @@
 --      persisted interpretation record (spec/hash/model/prompt are
 --      server-owned, never client-supplied).  Manual-path runs use
 --      model_id = 'manual' and raw_prompt = NULL.
---   4. spec_hash enables launch recheck: Save Draft records the hash;
---      Start verifies the audience hasn't drifted.
+--   4. spec_hash recorded for future launch-phase integration (v1 is
+--      Save Draft only; launch recheck deferred to later slice).
 --   5. email_normalized is NULLABLE so the retention-redaction RPC
 --      can set it to NULL without colliding with the UNIQUE
 --      constraint (run_id, email_normalized).  PostgreSQL treats
@@ -47,6 +47,7 @@ create table if not exists public.campaign_audience_interpretations (
   spec            jsonb not null,
   spec_hash       text not null,
   model_id        text not null,
+  privacy_screen_version text not null default 'contact_pattern_v1',
   created_at      timestamptz not null default now(),
   expires_at      timestamptz not null default (now() + interval '1 hour'),
   consumed_at     timestamptz,          -- set atomically when resolve binds it
@@ -102,6 +103,9 @@ create table if not exists public.campaign_audience_runs (
   total_ambiguous      int not null default 0,
   total_duplicate      int not null default 0,
   total_active_enrollment int not null default 0,
+  -- Draft link: nullable FK to campaign_drafts (set by link-audience-draft).
+  -- campaign_id is for the later launch phase; draft_id is the v1 local save.
+  draft_id             uuid references public.campaign_drafts(id) on delete set null,
   -- Lifecycle
   status               text not null default 'preview'
                          check (status in ('preview','draft_linked','launched','expired')),
@@ -145,7 +149,7 @@ grant select on public.campaign_audience_runs to authenticated;
 revoke all on public.campaign_audience_runs from anon;
 
 comment on table public.campaign_audience_runs is
-  'Immutable provenance: one row per audience resolution. user_id ON DELETE SET NULL preserves audit trail after user departure. raw_prompt + member PII redacted to NULL after retention_expires_at. spec_hash enables launch-time recheck.';
+  'Immutable provenance: one row per audience resolution. user_id ON DELETE SET NULL preserves audit trail after user departure. raw_prompt + member PII redacted to NULL after retention_expires_at. spec_hash recorded for future launch-phase integration (v1 is Save Draft only).';
 
 -- ── 3. campaign_audience_run_members ──────────────────────────────────────
 
@@ -251,7 +255,8 @@ create or replace function public.create_audience_interpretation(
   p_brief     text,
   p_spec      jsonb,
   p_spec_hash text,
-  p_model_id  text
+  p_model_id  text,
+  p_privacy_screen_version text default 'contact_pattern_v1'
 )
 returns uuid
 language plpgsql
@@ -279,9 +284,9 @@ begin
   end if;
 
   insert into public.campaign_audience_interpretations (
-    user_id, brief, spec, spec_hash, model_id
+    user_id, brief, spec, spec_hash, model_id, privacy_screen_version
   ) values (
-    p_user_id, trim(p_brief), p_spec, p_spec_hash, p_model_id
+    p_user_id, trim(p_brief), p_spec, p_spec_hash, p_model_id, p_privacy_screen_version
   )
   returning id into v_id;
 
@@ -289,9 +294,9 @@ begin
 end;
 $$;
 
-revoke all on function public.create_audience_interpretation(uuid, text, jsonb, text, text)
+revoke all on function public.create_audience_interpretation(uuid, text, jsonb, text, text, text)
   from public, anon, authenticated;
-grant execute on function public.create_audience_interpretation(uuid, text, jsonb, text, text)
+grant execute on function public.create_audience_interpretation(uuid, text, jsonb, text, text, text)
   to service_role;
 
 -- ── 6. RPC: create_audience_run_with_members ─────────────────────────────
@@ -486,10 +491,13 @@ grant execute on function public.create_audience_run_with_members(jsonb, jsonb, 
 
 -- ── 7. RPC: audience_run_set_status ──────────────────────────────────────
 
+drop function if exists public.audience_run_set_status(uuid, text, uuid, text);
+
 create or replace function public.audience_run_set_status(
   p_run_id uuid,
   p_new_status text,
   p_campaign_id uuid default null,
+  p_draft_id uuid default null,
   p_launched_spec_hash text default null
 )
 returns void
@@ -523,15 +531,16 @@ begin
   update public.campaign_audience_runs
   set status = p_new_status,
       campaign_id = coalesce(p_campaign_id, campaign_id),
+      draft_id = coalesce(p_draft_id, draft_id),
       launched_at = case when p_new_status = 'launched' then now() else launched_at end,
       launched_spec_hash = coalesce(p_launched_spec_hash, launched_spec_hash)
   where id = p_run_id;
 end;
 $$;
 
-revoke all on function public.audience_run_set_status(uuid, text, uuid, text)
+revoke all on function public.audience_run_set_status(uuid, text, uuid, uuid, text)
   from public, anon, authenticated;
-grant execute on function public.audience_run_set_status(uuid, text, uuid, text)
+grant execute on function public.audience_run_set_status(uuid, text, uuid, uuid, text)
   to service_role;
 
 -- ── 8. RPC: audience_run_redact_expired ──────────────────────────────────
@@ -653,33 +662,20 @@ create index if not exists idx_campaign_enrollments_email_lower_active
   on public.campaign_enrollments(lower(trim(email)))
   where status = 'active';
 
--- ── 11. Blocker 6: Retention schedule ────────────────────────────────────
+-- ── 11. Retention scheduling (NOT done by this migration) ────────────────
 --
--- pg_cron invocation for Staging.  Wrapped in DO block so the migration
--- succeeds even if pg_cron is not installed (logs a notice instead).
-
-do $do_cron$
-begin
-  if exists (select 1 from pg_extension where extname = 'pg_cron') then
-    -- Daily at 03:00 UTC: redact expired provenance PII
-    perform cron.schedule(
-      'audience-provenance-redact-daily',
-      '0 3 * * *',
-      $cmd$select public.audience_run_redact_expired()$cmd$
-    );
-    -- Daily at 04:00 UTC: clean up expired unconsumed interpretations
-    perform cron.schedule(
-      'audience-interpretations-cleanup-daily',
-      '0 4 * * *',
-      $cmd$select public.audience_interpretation_cleanup()$cmd$
-    );
-    raise notice 'pg_cron: audience provenance redaction + interpretation cleanup scheduled';
-  else
-    raise notice 'DEPLOYMENT REQUIREMENT: pg_cron not available — manually schedule: SELECT public.audience_run_redact_expired() daily and SELECT public.audience_interpretation_cleanup() daily';
-  end if;
-exception when others then
-  raise notice 'pg_cron scheduling skipped: % — schedule audience_run_redact_expired() and audience_interpretation_cleanup() manually', sqlerrm;
-end $do_cron$;
+-- The redaction/cleanup RPCs (audience_run_redact_expired,
+-- audience_interpretation_cleanup) are service-role-only and ready to call.
+-- This migration intentionally does NOT schedule them via pg_cron to
+-- avoid silently altering Production scheduler state when this migration
+-- is eventually promoted.
+--
+-- STAGING DEPLOYMENT REQUIREMENT: after applying this migration, manually
+-- schedule via pg_cron or an external cron (GitHub Actions, Supabase
+-- dashboard, etc.):
+--   SELECT public.audience_run_redact_expired();   -- daily, e.g. 03:00 UTC
+--   SELECT public.audience_interpretation_cleanup(); -- daily, e.g. 04:00 UTC
+--
 
 commit;
 

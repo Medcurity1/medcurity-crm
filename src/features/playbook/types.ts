@@ -167,3 +167,66 @@ export interface CampaignAdaptation {
   metrics_at_time: CampaignMetrics | null;
   created_at: string;
 }
+
+// ── AI Audience types (AI Campaigns v1) ──────────────────────────────────
+
+/** Result of interpret-audience: a server-persisted interpretation record. */
+export interface AudienceInterpretResult {
+  success: boolean;
+  interpretation_id: string;
+  spec: AudienceSpecV1;
+  spec_hash: string;
+  model_id: string;
+}
+
+/** Strict versioned AudienceSpec v1 — mirrors the backend type. */
+export interface AudienceSpecV1 {
+  version: 1;
+  filters: {
+    industry_category_values?: string[];
+    project_segment_values?: string[];
+    state_values?: string[];
+  };
+  exclude_customers: true;
+  exclude_former_customers: true;
+  exclude_partners: true;
+  exclude_suppressed: true;
+  exclude_active_enrollments: true;
+  max_results: number;
+  ambiguous_criteria?: string[];
+  unsupported_criteria?: string[];
+}
+
+/** A single member in the audience resolution preview. */
+export interface AudienceMemberPreview {
+  contact_id: string;
+  account_id: string;
+  email: string;
+  disposition: "eligible" | "excluded" | "ambiguous" | "active_enrollment";
+  reason_codes: string[];
+  account_name: string | null;
+  industry_category: string | null;
+  state: string | null;
+}
+
+/** Result of resolve-audience: the full audience resolution with provenance. */
+export interface AudienceResolveResult {
+  success: boolean;
+  run_id: string;
+  interpretation_id: string | null;
+  spec_hash: string;
+  counts: {
+    total_scanned: number;
+    scan_truncated: boolean;
+    total_matched: number;
+    total_eligible: number;
+    total_excluded: number;
+    total_ambiguous: number;
+    total_duplicate: number;
+    total_active_enrollment: number;
+  };
+  eligible: AudienceMemberPreview[];
+  excluded: AudienceMemberPreview[];
+  ambiguous: AudienceMemberPreview[];
+  active_enrollments: AudienceMemberPreview[];
+}

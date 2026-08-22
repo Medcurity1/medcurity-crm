@@ -92,13 +92,17 @@ export const MAX_RESULTS_DEFAULT = 500;
 /** Maximum raw brief length (characters) accepted by interpret-audience. */
 export const BRIEF_MAX_LENGTH = 2000;
 
-// ── Blocker 3: PII guard ─────────────────────────────────────────────────
+// ── Contact-pattern screen (lightweight, not exhaustive) ─────────────────
+
+/** Current version identifier for the privacy screen. Persisted on
+ *  interpretation records so provenance shows which screen ran. */
+export const PRIVACY_SCREEN_VERSION = "contact_pattern_v1";
 
 /**
- * Detect obvious PII patterns in a brief before sending to AI or storing.
- * Returns an array of PII types found (empty = clean).
- * Not a substitute for a full PII scanner — catches the common cases:
- * email addresses, phone numbers (US 10-digit, intl with +), SSN patterns.
+ * Screen a brief for obvious contact patterns before sending to AI or
+ * storing. Returns an array of pattern types found (empty = clean).
+ * Intentionally lightweight: catches email addresses, US phone numbers,
+ * and SSN patterns. Not a substitute for a full PII scanner.
  */
 export function detectPiiPatterns(text: string): string[] {
   if (!text || typeof text !== "string") return [];
@@ -118,7 +122,7 @@ export function detectPiiPatterns(text: string): string[] {
   return found;
 }
 
-/** Human-readable rejection message for PII found in a brief. */
+/** Human-readable rejection for contact patterns found in a brief. */
 export function piiRejectionMessage(piiTypes: string[]): string {
   return `Brief contains what looks like a ${piiTypes.join(" and ")}. Remove personal contact information before submitting — describe your audience by organization type, geography, and segment, not by individual identity.`;
 }
@@ -370,6 +374,38 @@ export async function specHash(spec: AudienceSpecV1): Promise<string> {
   return Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/** US state name -> 2-letter code mapping for canonicalization. */
+const US_STATE_NAME_TO_CODE: Record<string, string> = {
+  "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+  "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+  "district of columbia": "DC", "florida": "FL", "georgia": "GA", "hawaii": "HI",
+  "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+  "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+  "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+  "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+  "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+  "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+  "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+  "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+  "vermont": "VT", "virginia": "VA", "washington": "WA", "west virginia": "WV",
+  "wisconsin": "WI", "wyoming": "WY",
+};
+
+/**
+ * Canonicalize a state value to a 2-letter US state code.
+ * Accepts: 2-letter code (case-insensitive), full state name, or
+ * whitespace-padded variants. Returns null if not recognized.
+ */
+export function canonicalizeStateCode(raw: string | null | undefined): string | null {
+  if (!raw || typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const upper = trimmed.toUpperCase();
+  if (US_STATE_SET.has(upper)) return upper;
+  const lower = trimmed.toLowerCase();
+  return US_STATE_NAME_TO_CODE[lower] ?? null;
 }
 
 /**

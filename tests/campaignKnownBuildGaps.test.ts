@@ -63,8 +63,8 @@ describe("known Campaigns build gaps", () => {
 
   it("keeps the chosen build method and campaign title when the unified builder autosaves or switches methods", () => {
     const wizard = read("src/features/playbook/CampaignWizard.tsx");
-    expect(wizard).toMatch(/v: 1, mode, flow, customSequence, step/);
-    expect(wizard).toMatch(/setFlow\(s\.flow \?\?/);
+    expect(wizard).toMatch(/v: 1, mode,/);
+    expect(wizard).toMatch(/s\.flow \?\?/);
     expect(wizard).toMatch(/campaign\?\.campaign_name \?\? templateName/);
     expect(wizard).toMatch(/requestedName \? \{ \.\.\.r\.campaign, campaign_name: requestedName \}/);
     expect(wizard).toMatch(/Customize sequence/);

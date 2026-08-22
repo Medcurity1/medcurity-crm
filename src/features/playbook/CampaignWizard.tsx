@@ -17,7 +17,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import {
   Loader2, Sparkles, Wand2, ArrowLeft, ArrowRight, Rocket, CheckCircle2, AlertTriangle,
-  Plus, Trash2, Eye, PencilLine, PenLine, LayoutTemplate, RotateCw, UserRound, Building2, Signature,
+  Plus, Trash2, Eye, PencilLine, PenLine, LayoutTemplate, RotateCw, UserRound, Building2, Signature, Users, Save,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -63,8 +63,10 @@ import {
   useGenerateCampaign, useSuggestCampaign, useRegenerateEmail, useEmailAccounts, useLaunchCampaign,
   useInboxHealth, useSmartleadStatus, useActiveUsers, useCampaignTemplates, smartleadUrl,
   fetchLatestCampaignDraft, saveCampaignDraft, deleteCampaignDraft,
+  useGenerateAudienceDraft, useLinkAudienceDraft, useExpireAudienceRun,
   type GeneratedCampaign, type Recipient, type ActiveEnrollmentEntry,
 } from "./api";
+import { AiAudienceFlow, type AiAudienceResult } from "./AiAudienceFlow";
 
 type Step = 1 | 2 | 3;
 const MAX_EMAILS = 7;
@@ -138,7 +140,7 @@ function projectSendRamp(steps: SequenceStep[], leadsPerDay: number, recipientCo
 interface CampaignDraftState {
   v: 1;
   mode: "ai" | "template";
-  flow?: "choose" | "ai" | "template";
+  flow?: "choose" | "ai" | "template" | "ask-ai";
   customSequence?: boolean;
   step: Step;
   description: string;
@@ -155,6 +157,22 @@ interface CampaignDraftState {
   leadsPerDay: number;
   minGap: number;
   delivery?: Partial<DeliverySettings>;
+  // AI audience provenance (survives save/resume).
+  // brief: user's PII-checked original description (generation context).
+  // spec: full AudienceSpecV1 at resolution time (not fabricated on resume).
+  aiAudience?: {
+    runId: string;
+    interpretationId: string;
+    specHash: string;
+    brief: string;
+    spec: import("./types").AudienceSpecV1;
+    counts: {
+      total_eligible: number;
+      total_excluded: number;
+      total_ambiguous: number;
+      total_active_enrollment: number;
+    };
+  };
 }
 
 /** Type-guards a campaign_drafts.state_json blob before trusting it — an old
@@ -166,7 +184,7 @@ function parseCampaignDraftState(json: unknown): CampaignDraftState | null {
   const s = json as Record<string, unknown>;
   if (s.v !== 1) return null;
   if (s.mode !== "ai" && s.mode !== "template") return null;
-  if (s.flow !== undefined && s.flow !== "choose" && s.flow !== "ai" && s.flow !== "template") return null;
+  if (s.flow !== undefined && s.flow !== "choose" && s.flow !== "ai" && s.flow !== "template" && s.flow !== "ask-ai") return null;
   if (typeof s.step !== "number") return null;
   if (typeof s.description !== "string") return null;
   if (s.campaign !== null && typeof s.campaign !== "object") return null;
@@ -182,10 +200,34 @@ function parseCampaignDraftState(json: unknown): CampaignDraftState | null {
   if (typeof s.leadsPerDay !== "number") return null;
   if (typeof s.minGap !== "number") return null;
   if (s.customSequence !== undefined && typeof s.customSequence !== "boolean") return null;
+  // Deep-validate aiAudience if present: reject malformed provenance
+  if (s.aiAudience !== undefined) {
+    if (s.aiAudience === null || typeof s.aiAudience !== "object") return null;
+    const a = s.aiAudience as Record<string, unknown>;
+    if (typeof a.runId !== "string" || !a.runId) return null;
+    if (typeof a.interpretationId !== "string" || !a.interpretationId) return null;
+    if (typeof a.specHash !== "string" || !a.specHash) return null;
+    if (typeof a.brief !== "string") return null;
+    if (!a.spec || typeof a.spec !== "object") return null;
+    const sp = a.spec as Record<string, unknown>;
+    if (sp.version !== 1 || !sp.filters || typeof sp.filters !== "object") return null;
+    if (!a.counts || typeof a.counts !== "object") return null;
+    const c = a.counts as Record<string, unknown>;
+    if (typeof c.total_eligible !== "number") return null;
+    if (typeof c.total_excluded !== "number") return null;
+    if (typeof c.total_ambiguous !== "number") return null;
+    if (typeof c.total_active_enrollment !== "number") return null;
+  }
   return s as unknown as CampaignDraftState;
 }
 
 const BUILD_START_METHODS = [
+  {
+    id: "ask-ai" as const,
+    label: "Ask AI",
+    description: "Describe your audience and get a proposed campaign.",
+    Icon: Sparkles,
+  },
   {
     id: "template" as const,
     label: "Use a template",
@@ -296,13 +338,26 @@ export function CampaignWizard({
   const [templateSteps, setTemplateSteps] = useState<SequenceStep[]>(
     templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : [],
   );
-  const [flow, setFlow] = useState<"choose" | "ai" | "template">(mode === "template" ? "template" : "choose");
+  const [flow, setFlow] = useState<"choose" | "ai" | "template" | "ask-ai">(mode === "template" ? "template" : "choose");
   const [customSequence, setCustomSequence] = useState(false);
   const [editingSequence, setEditingSequence] = useState(false);
   const [sequenceAttempted, setSequenceAttempted] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // AI Audience state — tracks the resolved audience result from AiAudienceFlow
+  const [aiAudienceResult, setAiAudienceResult] = useState<AiAudienceResult | null>(null);
+  // AI audience draft saved success state (local save, not Smartlead launch).
+  // aiDraftSavedSnapshot tracks the exact serialized state at save time so
+  // subsequent edits re-dirty the guard (aiDraftSaved resets to false).
+  const [aiDraftSaved, setAiDraftSaved] = useState(false);
+  const aiDraftSavedSnapshotRef = useRef<string | null>(null);
 
   const gen = useGenerateCampaign();
+  const genAudienceDraft = useGenerateAudienceDraft();
+  const linkDraft = useLinkAudienceDraft();
+  const expireRun = useExpireAudienceRun();
+  // Tracks whether linking has been attempted for the current draft save
+  // to prevent autosave from repeatedly re-linking.
+  const aiDraftLinkedRef = useRef(false);
   const suggest = useSuggestCampaign();
   const regen = useRegenerateEmail();
   const { data: tags } = useTags();
@@ -434,19 +489,22 @@ export function CampaignWizard({
   const hasMeaningfulContent = useMemo(() => {
     if (recipients.length > 0) return true;
     if (templateName.trim()) return true;
+    if (aiAudienceResult) return true;
     if (mode === "ai" && campaign?.sequence.some((e) => e.subject.trim() || plain(e.body_html).trim())) return true;
     if (templateSteps.some((s) => (s.subject_template ?? "").trim() || plain(s.body_template ?? "").trim())) return true;
     return false;
-  }, [recipients, templateName, mode, campaign, templateSteps]);
+  }, [recipients, templateName, aiAudienceResult, mode, campaign, templateSteps]);
 
   const closeStateSnapshot = useMemo(() => JSON.stringify({
     step, description, campaign, templateName, templateSteps, flow, customSequence,
     recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
     autoStart, adaptive, leadsPerDay, minGap, sendDays, sendStart, sendEnd, sendTimezone,
+    aiAudienceRunId: aiAudienceResult?.runId,
   }), [
     step, description, campaign, templateName, templateSteps, flow, customSequence,
     recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
     autoStart, adaptive, leadsPerDay, minGap, sendDays, sendStart, sendEnd, sendTimezone,
+    aiAudienceResult,
   ]);
 
   useEffect(() => {
@@ -463,10 +521,23 @@ export function CampaignWizard({
     setWizardDirty(closeStateSnapshot !== closeBaselineRef.current);
   }, [open, closeStateSnapshot]);
 
+  // If the user edits after an explicit AI draft save, the saved snapshot
+  // no longer matches the current state, so we must re-dirty the guard.
+  useEffect(() => {
+    if (!aiDraftSaved || !aiDraftSavedSnapshotRef.current) return;
+    if (closeStateSnapshot !== aiDraftSavedSnapshotRef.current) {
+      setAiDraftSaved(false);
+      aiDraftSavedSnapshotRef.current = null;
+    }
+  }, [aiDraftSaved, closeStateSnapshot]);
+
   // Guard every Radix dismissal path, including the built-in X, Escape,
   // and outside click. Autosave is still a recovery net, but it must not be
   // used as permission to silently close while a person is actively editing.
-  const discard = useDialogDiscardGuard(wizardDirty && !launchResult, () => {
+  // Bypass discard guard when an AI draft was explicitly saved (aiDraftSaved)
+  // or when a normal launch completed (launchResult). Both mean the EXACT
+  // saved state matches the current state; edits after save re-dirty.
+  const discard = useDialogDiscardGuard(wizardDirty && !launchResult && !aiDraftSaved, () => {
     reset();
     onOpenChange(false);
   });
@@ -501,14 +572,36 @@ export function CampaignWizard({
   // saved") on every open-then-close with zero user interaction. Same row
   // every time (draftIdRef), so this never piles up more than one row per
   // session.
+  // Centralized draft state builder. Used by BOTH autosave and explicit
+  // doSaveAiDraft so provenance can never drift between them.
+  function buildDraftState(): CampaignDraftState {
+    const base: CampaignDraftState = {
+      v: 1, mode, flow: aiAudienceResult ? "ai" : flow, customSequence, step, description, campaign, templateName, templateSteps,
+      recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
+      autoStart: aiAudienceResult ? false : autoStart, adaptive, leadsPerDay, minGap, delivery: deliverySettings,
+    };
+    if (aiAudienceResult) {
+      base.aiAudience = {
+        runId: aiAudienceResult.runId,
+        interpretationId: aiAudienceResult.interpretationId,
+        specHash: aiAudienceResult.specHash,
+        brief: aiAudienceResult.brief,
+        spec: aiAudienceResult.spec,
+        counts: {
+          total_eligible: aiAudienceResult.counts.total_eligible,
+          total_excluded: aiAudienceResult.counts.total_excluded,
+          total_ambiguous: aiAudienceResult.counts.total_ambiguous,
+          total_active_enrollment: aiAudienceResult.counts.total_active_enrollment,
+        },
+      };
+    }
+    return base;
+  }
+
   useEffect(() => {
     if (!open) { autosaveBaselineRef.current = null; return; }
     if (launch.isPending || launchResult || !hasMeaningfulContent) return;
-    const state: CampaignDraftState = {
-      v: 1, mode, flow, customSequence, step, description, campaign, templateName, templateSteps,
-      recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
-      autoStart, adaptive, leadsPerDay, minGap, delivery: deliverySettings,
-    };
+    const state = buildDraftState();
     const serialized = JSON.stringify(state);
     if (autosaveBaselineRef.current === null) {
       // First qualifying render of this open — record what "untouched"
@@ -528,7 +621,7 @@ export function CampaignWizard({
     open, launch.isPending, launchResult, hasMeaningfulContent,
     mode, flow, customSequence, step, description, campaign, templateName, templateSteps,
     recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
-    autoStart, adaptive, leadsPerDay, minGap, deliverySettings,
+    autoStart, adaptive, leadsPerDay, minGap, deliverySettings, aiAudienceResult,
   ]);
 
   function resumeDraft() {
@@ -543,14 +636,38 @@ export function CampaignWizard({
     setStep(resumeLaunchStep(mode, s.step, hasLockedRecipients));
     setDescription(s.description); setCampaign(s.campaign);
     setTemplateName(s.templateName); setTemplateSteps(s.templateSteps);
-    setFlow(s.flow ?? (s.campaign ? "ai" : s.templateSteps.length ? "template" : mode === "template" ? "template" : "choose"));
+    // AI audience drafts are saved with flow='ai' so the editor renders;
+    // aiAudience presence forces draft-only safety on resume.
+    const isAiAudienceDraft = !!s.aiAudience;
+    const resumedFlow = isAiAudienceDraft
+      ? "ai" as typeof flow
+      : (s.flow ?? (s.campaign ? "ai" : s.templateSteps.length ? "template" : mode === "template" ? "template" : "choose")) as typeof flow;
+    setFlow(resumedFlow);
     setCustomSequence(Boolean(s.customSequence));
     setEditingSequence(false);
     setSequenceAttempted(false);
     setRecipients(s.recipients);
     setSuppressionOverrides(s.suppressionOverrides); setEnrollmentOverrides(s.enrollmentOverrides);
     setInboxId(s.inboxId); setOwnerId(s.ownerId);
-    setAutoStart(s.autoStart); setAdaptive(s.adaptive);
+    // AI audience drafts must stay draft-only on resume
+    setAutoStart(isAiAudienceDraft ? false : s.autoStart);
+    setAdaptive(s.adaptive);
+    // Restore AI provenance from saved spec (not fabricated)
+    if (s.aiAudience) {
+      setAiAudienceResult({
+        runId: s.aiAudience.runId,
+        interpretationId: s.aiAudience.interpretationId,
+        specHash: s.aiAudience.specHash,
+        spec: s.aiAudience.spec,
+        brief: s.aiAudience.brief ?? "",
+        recipients: s.recipients,
+        counts: { ...s.aiAudience.counts, total_scanned: 0, scan_truncated: false, total_matched: 0, total_duplicate: 0 },
+        eligible: [],
+        excluded: [],
+        ambiguous: [],
+        activeEnrollments: [],
+      });
+    }
     const delivery = normalizeDeliverySettings(s.delivery ?? {
       campaignDailyVolume: s.leadsPerDay,
       messageSpacingMinutes: s.minGap,
@@ -564,8 +681,16 @@ export function CampaignWizard({
   function discardDraft() {
     if (!draftBanner) return;
     const id = draftBanner.id;
+    const runId = draftBanner.state.aiAudience?.runId;
     setDraftBanner(null);
     deleteCampaignDraft(id).catch(() => {});
+    // Expire the linked audience run when explicitly discarding an AI draft.
+    // Failure warns but does not resurrect the draft (best-effort).
+    if (runId) {
+      expireRun.mutate({ run_id: runId }, {
+        onError: (err) => toast.warning("Draft discarded, but the audience run could not be expired: " + (err as Error).message),
+      });
+    }
   }
 
   function reset() {
@@ -584,6 +709,7 @@ export function CampaignWizard({
     setCustomSequence(false);
     setEditingSequence(false); setSequenceAttempted(false); setSettingsOpen(false);
     setConfirmOpen(false); setDraftBanner(null); draftIdRef.current = null;
+    setAiAudienceResult(null); setAiDraftSaved(false); aiDraftLinkedRef.current = false; aiDraftSavedSnapshotRef.current = null;
     autosaveBaselineRef.current = null;
     closeBaselineRef.current = null;
     setWizardDirty(false);
@@ -600,6 +726,30 @@ export function CampaignWizard({
       setFlow("ai"); setSuggestions(null); setAppliedSug(new Set());
     } });
   }
+  /** When AiAudienceFlow completes: store result, pre-populate recipients,
+   *  generate a 3-email sequence via the rep-safe generate-audience-draft
+   *  action (not the admin-only generate-campaign), then show the editor. */
+  function handleAiAudienceComplete(result: AiAudienceResult) {
+    setAiAudienceResult(result);
+    setRecipients(result.recipients);
+    // Use the original PII-checked brief as generation context instead of
+    // inventing services/claims. The AI prompt already knows Medcurity's
+    // products; the brief provides audience + goal context.
+    const genDesc = `Write a 3-email outreach sequence for Medcurity targeting ${result.counts.total_eligible} people. Context from the user: "${result.brief}". Label all copy as proposed.`;
+    setDescription(genDesc);
+    // Use the rep-safe draft generator (not admin-only generate-campaign)
+    genAudienceDraft.mutate(genDesc, {
+      onSuccess: (r) => {
+        setCampaign(r.campaign);
+        setFlow("ai");
+        setSuggestions(null);
+        setAppliedSug(new Set());
+        // Force Save-as-draft mode for AI audience campaigns
+        setAutoStart(false);
+      },
+    });
+  }
+
   function regenerateWithFeedback() {
     const fb = regenFeedback.trim();
     if (!fb) return;
@@ -683,6 +833,44 @@ export function CampaignWizard({
     // upload; a bookkeeping write failed after sending started) — surface
     // it, don't swallow it (outside-review fix 3).
     if (r.warning) toast.warning(r.warning, { duration: 12000 });
+  }
+
+  // AI audience draft: Pulse-local save via campaign_drafts. No Smartlead,
+  // no launch, no enrollment, no sender account, no campaign creation.
+  const [aiDraftSaving, setAiDraftSaving] = useState(false);
+  function doSaveAiDraft() {
+    if (!campaign || !aiAudienceResult) return;
+    setAiDraftSaving(true);
+    const title = campaign.campaign_name.trim() || templateName.trim() || "AI audience draft";
+    // Uses centralized buildDraftState to prevent provenance drift vs autosave.
+    const draftState = buildDraftState();
+    saveCampaignDraft({ id: draftIdRef.current ?? undefined, title, state_json: draftState as unknown as Record<string, unknown> })
+      .then((savedId) => {
+        draftIdRef.current = savedId;
+        setAiDraftSaved(true);
+        // Record exact saved state so edits after save re-dirty the guard
+        aiDraftSavedSnapshotRef.current = closeStateSnapshot;
+        setAiDraftSaving(false);
+        setWizardDirty(false);
+        // Link provenance: save succeeded, now link run -> draft.
+        // If linking fails, the draft is still saved; show a precise warning.
+        if (!aiDraftLinkedRef.current) {
+          linkDraft.mutate(
+            { run_id: aiAudienceResult!.runId, draft_id: savedId },
+            {
+              onSuccess: () => { aiDraftLinkedRef.current = true; },
+              onError: (err) => {
+                toast.warning("Draft saved, but audience provenance could not be linked: " + (err as Error).message + ". You can retry from the saved draft.");
+              },
+            },
+          );
+        }
+        toast.success("Draft saved. Choose Create campaign, then Resume to continue.");
+      })
+      .catch((err) => {
+        setAiDraftSaving(false);
+        toast.error("Could not save draft: " + (err as Error).message);
+      });
   }
 
   function doLaunch() {
@@ -885,12 +1073,18 @@ export function CampaignWizard({
               <div className="space-y-2">
                 <p className="text-xs font-medium text-muted-foreground">How would you like to start?</p>
                 <div className="camp-methods" role="group" aria-label="How would you like to start?">
-                  {BUILD_START_METHODS.map(({ id, label, description, Icon }) => {
-                    const selected = id === "choose"
-                      ? flow === "template" && customSequence
-                      : id === "template"
-                        ? flow === "template" && !customSequence
-                        : flow === "ai";
+                  {BUILD_START_METHODS.filter(({ id }) =>
+                    // "Draft with AI" (id="ai") uses admin-only generate-campaign;
+                    // hide for non-admins. Ask AI uses the rep-safe path.
+                    id !== "ai" || isAdmin
+                  ).map(({ id, label, description, Icon }) => {
+                    const selected = id === "ask-ai"
+                      ? flow === "ask-ai"
+                      : id === "choose"
+                        ? flow === "template" && customSequence
+                        : id === "template"
+                          ? flow === "template" && !customSequence
+                          : flow === "ai";
                     return (
                       <button
                         key={id}
@@ -901,22 +1095,32 @@ export function CampaignWizard({
                         className="camp-method"
                         onClick={() => {
                           setSequenceAttempted(false);
-                          if (id === "choose") {
+                          if (id === "ask-ai") {
+                            setFlow("ask-ai");
+                            setEditingSequence(false);
+                            setAiAudienceResult(null);
+                            // AI audience campaigns save as draft only (no autoStart)
+                            setAutoStart(false);
+                          } else if (id === "choose") {
                             setFlow("template");
                             if (!customSequence) setTemplateSteps(recommendedCustomSequence());
                             setCustomSequence(true);
                             setAutoStart(true);
                             setEditingSequence(false);
+                            // Clear stale AI audience state when switching methods
+                            setAiAudienceResult(null);
                           } else if (id === "template") {
                             setFlow("template");
                             setCustomSequence(false);
                             setAutoStart(true);
                             setEditingSequence(false);
                             setTemplateSteps(templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : []);
+                            setAiAudienceResult(null);
                           } else {
                             setFlow("ai");
                             setAutoStart(true);
                             setEditingSequence(false);
+                            setAiAudienceResult(null);
                           }
                         }}
                       >
@@ -930,6 +1134,25 @@ export function CampaignWizard({
                   })}
                 </div>
               </div>
+
+              {/* Ask AI audience flow — sub-steps inside Build */}
+              {flow === "ask-ai" && !campaign && (
+                <AiAudienceFlow
+                  onComplete={handleAiAudienceComplete}
+                  onBack={() => { setFlow("choose"); setAiAudienceResult(null); }}
+                />
+              )}
+
+              {/* AI sequence generation loading state after audience is confirmed */}
+              {flow === "ask-ai" && !campaign && genAudienceDraft.isPending && (
+                <div className="camp-card p-5 text-center space-y-2">
+                  <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
+                  <p className="text-sm font-medium">Generating your campaign sequence…</p>
+                  <p className="text-xs text-muted-foreground">
+                    Writing 3 emails for {aiAudienceResult?.counts.total_eligible ?? 0} people based on your audience.
+                  </p>
+                </div>
+              )}
 
               {flow === "ai" && !campaign && (
                 <div className="camp-card p-4 space-y-2">
@@ -1020,6 +1243,18 @@ export function CampaignWizard({
           {/* AI sequence editor lives on Build after a draft is generated */}
           {step === 1 && flow === "ai" && campaign && (
             <div className="space-y-3">
+              {/* AI audience provenance badge */}
+              {aiAudienceResult && (
+                <div className="flex items-center gap-2 rounded-md border bg-primary/5 px-3 py-2 text-xs" role="status">
+                  <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span>
+                    <strong>AI-resolved audience:</strong> {aiAudienceResult.counts.total_eligible} eligible{" "}
+                    {aiAudienceResult.counts.total_eligible === 1 ? "person" : "people"} from your CRM.
+                    {aiAudienceResult.counts.total_excluded > 0 && ` ${aiAudienceResult.counts.total_excluded} excluded.`}
+                    {" "}Proposed AI content below. Fully editable.
+                  </span>
+                </div>
+              )}
               <div className="space-y-1.5 sm:max-w-md">
                 <Label className="text-xs">Audience</Label>
                 <Input
@@ -1059,15 +1294,18 @@ export function CampaignWizard({
                         <Button variant="ghost" size="xs" className="h-6" disabled={hasAdvancedFormatting} onClick={() => toggleCode(email.seq_number)}>
                           {isPreview ? <><PencilLine className="h-3 w-3 mr-1" /> Write</> : <><Eye className="h-3 w-3 mr-1" /> Preview</>}
                         </Button>
-                        <Button
-                          variant="ai" size="xs" className="h-6"
-                          disabled={regen.isPending}
-                          onClick={() => regen.mutate({ description, campaign, seq_number: email.seq_number }, { onSuccess: (r) => editEmail(email.seq_number, r.email) })}
-                        >
-                          {regen.isPending && regen.variables?.seq_number === email.seq_number
-                            ? <Loader2 className="h-3 w-3 animate-spin" />
-                            : <><span className="ai-icon"><Wand2 className="h-3 w-3" /></span></>}
-                        </Button>
+                        {/* Per-email AI rewrite uses admin-only regenerate-email; hidden in AI audience mode */}
+                        {!aiAudienceResult && (
+                          <Button
+                            variant="ai" size="xs" className="h-6"
+                            disabled={regen.isPending}
+                            onClick={() => regen.mutate({ description, campaign, seq_number: email.seq_number }, { onSuccess: (r) => editEmail(email.seq_number, r.email) })}
+                          >
+                            {regen.isPending && regen.variables?.seq_number === email.seq_number
+                              ? <Loader2 className="h-3 w-3 animate-spin" />
+                              : <><span className="ai-icon"><Wand2 className="h-3 w-3" /></span></>}
+                          </Button>
+                        )}
                         <Button variant="ghost" size="xs" className="h-6 text-muted-foreground hover:text-destructive"
                           disabled={campaign.sequence.length <= 1} onClick={() => deleteEmail(email.seq_number)}>
                           <Trash2 className="h-3 w-3" />
@@ -1128,13 +1366,18 @@ export function CampaignWizard({
                 <button type="button" className="camp-btn text-xs" onClick={addEmail} disabled={campaign.sequence.length >= MAX_EMAILS}>
                   <Plus className="h-4 w-4" /> Add follow-up
                 </button>
-                <Button size="sm" variant="ai" onClick={() => setShowRegen((v) => !v)} disabled={gen.isPending}>
-                  <span className="ai-icon mr-1"><RotateCw className="h-4 w-4" /></span> Regenerate
-                </Button>
-                <Button size="sm" variant="ai" disabled={suggest.isPending}
-                  onClick={() => suggest.mutate(campaign, { onSuccess: (r) => { setSuggestions(parseSuggestions(r.suggestions)); setAppliedSug(new Set()); } })}>
-                  {suggest.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Thinking…</> : <><span className="ai-icon mr-1"><Sparkles className="h-4 w-4" /></span> Suggest improvements</>}
-                </Button>
+                {/* Regenerate and Suggest use admin-only actions; hidden in AI audience mode for v1. Manual editing remains available. */}
+                {!aiAudienceResult && (
+                  <>
+                    <Button size="sm" variant="ai" onClick={() => setShowRegen((v) => !v)} disabled={gen.isPending}>
+                      <span className="ai-icon mr-1"><RotateCw className="h-4 w-4" /></span> Regenerate
+                    </Button>
+                    <Button size="sm" variant="ai" disabled={suggest.isPending}
+                      onClick={() => suggest.mutate(campaign, { onSuccess: (r) => { setSuggestions(parseSuggestions(r.suggestions)); setAppliedSug(new Set()); } })}>
+                      {suggest.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Thinking…</> : <><span className="ai-icon mr-1"><Sparkles className="h-4 w-4" /></span> Suggest improvements</>}
+                    </Button>
+                  </>
+                )}
               </div>
 
               {showRegen && (
@@ -1171,7 +1414,7 @@ export function CampaignWizard({
               )}
 
               <div className="flex justify-between pt-2">
-                <Button variant="ghost" onClick={() => { setCampaign(null); setFlow("choose"); setCustomSequence(false); }}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+                <Button variant="ghost" onClick={() => { setCampaign(null); setFlow("choose"); setCustomSequence(false); setAiAudienceResult(null); }}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
                 <button
                   type="button"
                   className="camp-btn-primary"
@@ -1231,6 +1474,15 @@ export function CampaignWizard({
                 {stepperSteps && <p className="camp-step-kicker">Step 2 of {displayTotal}</p>}
                 <h2 className="camp-step-title">Who should get this?</h2>
               </div>
+              {aiAudienceResult && (
+                <div className="flex items-center gap-2 rounded-md border bg-primary/5 px-3 py-2 text-xs" role="status">
+                  <Users className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span>
+                    <strong>AI-resolved audience:</strong> {aiAudienceResult.counts.total_eligible} eligible from your CRM.
+                    You can add or remove individuals below.
+                  </span>
+                </div>
+              )}
               <CampaignRecipients
                 recipients={recipients} setRecipients={setRecipients} tags={tags ?? []}
                 suppression={suppression} setSuppression={setSuppression}
@@ -1258,8 +1510,83 @@ export function CampaignWizard({
             </div>
           )}
 
-          {/* Step 3 — Review */}
-          {step === 3 && !editingSequence && (
+          {/* Step 3 — Review (AI audience draft: local-only save) */}
+          {step === 3 && !editingSequence && aiAudienceResult && (
+            <div className="space-y-4">
+              {aiDraftSaved ? (
+                <div className="camp-card p-5 space-y-3">
+                  <CheckCircle2 className="h-8 w-8 text-green-600" />
+                  <p className="text-base font-semibold">Draft saved in Pulse.</p>
+                  <p className="text-sm text-muted-foreground">
+                    No recipients have been enrolled and no emails have been sent. To resume, choose Create campaign, then Resume. Starting campaigns from AI drafts is not yet available in this Staging preview.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {aiAudienceResult.counts.total_eligible} proposed recipient{aiAudienceResult.counts.total_eligible === 1 ? "" : "s"} saved with the draft.
+                  </p>
+                  <button type="button" className="camp-btn-primary text-xs" onClick={() => close(false)}>Done</button>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-1">
+                    {stepperSteps && <p className="camp-step-kicker">Step {displayTotal} of {displayTotal}</p>}
+                    <h2 className="camp-step-title">Review your draft</h2>
+                  </div>
+
+                  {/* Sequence summary */}
+                  <div className="camp-card p-4 space-y-2">
+                    <p className="text-sm font-medium">{campaign?.campaign_name || "Untitled campaign"}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {campaign?.sequence.length ?? 0} proposed email{(campaign?.sequence.length ?? 0) === 1 ? "" : "s"}, fully editable.
+                      {" "}All copy is AI-proposed and can be changed before sending.
+                    </p>
+                  </div>
+
+                  {/* Audience summary */}
+                  <div className="camp-card p-4 space-y-2">
+                    <p className="text-sm font-medium">Proposed audience</p>
+                    <p className="text-xs text-muted-foreground">
+                      {aiAudienceResult.counts.total_eligible} eligible {aiAudienceResult.counts.total_eligible === 1 ? "person" : "people"} from your CRM.
+                      {aiAudienceResult.counts.total_excluded > 0 && ` ${aiAudienceResult.counts.total_excluded} excluded.`}
+                      {aiAudienceResult.counts.total_ambiguous > 0 && ` ${aiAudienceResult.counts.total_ambiguous} ambiguous.`}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Source: Pulse CRM only. No external data.
+                    </p>
+                  </div>
+
+                  {/* What saving does (no false promises about inbox/Start) */}
+                  <div className="camp-card p-4 space-y-2">
+                    <p className="text-sm font-medium">What saving does</p>
+                    <p className="text-xs text-muted-foreground">
+                      Saving creates a Pulse draft. No sending inbox is assigned, no recipients are enrolled, and no Smartlead campaign is created yet.
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Resume to keep reviewing. Starting campaigns from AI drafts is not yet available in this Staging preview.
+                    </p>
+                  </div>
+
+                  <div className={cn("flex pt-2", hasLockedRecipients ? "justify-end" : "justify-between")}>
+                    {!hasLockedRecipients && (
+                      <Button variant="ghost" onClick={() => setStep(2)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+                    )}
+                    <button
+                      type="button"
+                      className="camp-btn-primary"
+                      onClick={doSaveAiDraft}
+                      disabled={aiDraftSaving || !campaign || campaign.sequence.length === 0}
+                    >
+                      {aiDraftSaving
+                        ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
+                        : <><Save className="h-4 w-4" /> Save draft</>}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Step 3 — Review (normal launch path) */}
+          {step === 3 && !editingSequence && !aiAudienceResult && (
             <div className="space-y-4">
               {!launchResult && (
                 <div className="space-y-1">
@@ -1570,7 +1897,9 @@ export function CampaignWizard({
                       <Button variant="ghost" onClick={() => setStep(2)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
                     )}
                     <button type="button" className="camp-btn-primary" onClick={() => setConfirmOpen(true)} disabled={launch.isPending || !copyReady || !audienceReady || !deliveryReady || !senderReady || smartleadDisabled}>
-                      {launch.isPending ? <><Loader2 className="h-4 w-4 animate-spin" /> Launching…</> : <><Rocket className="h-4 w-4" /> {autoStart ? "Launch campaign" : "Save draft"}</>}
+                      {launch.isPending
+                        ? <><Loader2 className="h-4 w-4 animate-spin" /> Launching…</>
+                        : <><Rocket className="h-4 w-4" /> {autoStart ? "Launch campaign" : "Save draft"}</>}
                     </button>
                   </div>
                 </>

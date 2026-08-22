@@ -801,6 +801,90 @@ export async function deleteCampaignDraft(id: string): Promise<void> {
   if (error) throw error;
 }
 
+// ---------------------------------------------------------------------------
+// AI Audience — interpret + resolve (AI Campaigns v1)
+// ---------------------------------------------------------------------------
+
+import type {
+  AudienceInterpretResult,
+  AudienceResolveResult,
+} from "./types";
+
+/**
+ * Rep-safe 3-email draft generation for AI audience campaigns.
+ * Calls the narrowly scoped generate-audience-draft action (not the
+ * admin-only generate-campaign). Pure AI call: no DB writes, no
+ * Smartlead, no enrollment side effects.
+ */
+export function useGenerateAudienceDraft() {
+  return useMutation({
+    mutationFn: (description: string) =>
+      invokeAI<{ campaign: GeneratedCampaign }>({ action: "generate-audience-draft", description }),
+    onError: (e) => toast.error("Draft generation failed: " + (e as Error).message),
+  });
+}
+
+/**
+ * Link a resolved audience run to a saved campaign draft.
+ * Verifies caller owns both the run and the draft.
+ * Idempotent: re-linking same pair is a no-op.
+ */
+export function useLinkAudienceDraft() {
+  return useMutation({
+    mutationFn: (p: { run_id: string; draft_id: string }) =>
+      invokeAI<{ success: boolean; already_linked?: boolean }>({
+        action: "link-audience-draft",
+        run_id: p.run_id,
+        draft_id: p.draft_id,
+      }),
+  });
+}
+
+/**
+ * Expire an audience run when a saved AI draft is explicitly discarded.
+ * Owner-checked. Failure warns but does not resurrect the draft.
+ */
+export function useExpireAudienceRun() {
+  return useMutation({
+    mutationFn: (p: { run_id: string }) =>
+      invokeAI<{ success: boolean; already_expired?: boolean }>({
+        action: "expire-audience-run",
+        run_id: p.run_id,
+      }),
+  });
+}
+
+/**
+ * Interpret a plain-English audience brief into a strict AudienceSpec v1.
+ * Returns an interpretation_id that must be passed to resolve-audience.
+ * Rejects briefs containing PII (emails, phone numbers, SSNs).
+ */
+export function useInterpretAudience() {
+  return useMutation({
+    mutationFn: (brief: string) =>
+      invokeAI<AudienceInterpretResult>({ action: "interpret-audience", brief }),
+    onError: (e) => toast.error("Interpretation failed: " + (e as Error).message),
+  });
+}
+
+/**
+ * Resolve a validated AudienceSpec v1 into a deterministic audience preview
+ * with per-member disposition, reason codes, and source snapshots.
+ * AI path: pass interpretation_id (server-persisted spec/hash/model).
+ * Manual path: pass spec directly.
+ */
+export function useResolveAudience() {
+  return useMutation({
+    mutationFn: (p: { interpretation_id: string; confirm_unfiltered?: boolean }) =>
+      invokeAI<AudienceResolveResult>({
+        action: "resolve-audience",
+        interpretation_id: p.interpretation_id,
+        confirm_unfiltered: p.confirm_unfiltered,
+      }),
+    onError: (e) => toast.error("Audience resolution failed: " + (e as Error).message),
+  });
+}
+
 /**
  * Re-register a campaign's Smartlead webhook on demand (docket I1) — the
  * detail sheet's "Repair live updates" button. Wraps playbook-smartlead's

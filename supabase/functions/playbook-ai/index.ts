@@ -54,6 +54,8 @@ import {
   normalizeEmail,
   detectPiiPatterns,
   piiRejectionMessage,
+  canonicalizeStateCode,
+  PRIVACY_SCREEN_VERSION,
 } from "../_shared/audience-spec.ts";
 
 const corsHeaders = {
@@ -65,6 +67,17 @@ function json(body: Record<string, unknown>, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+/** Typed error for AI audience actions. Maps to specific HTTP status codes. */
+class AudienceActionError extends Error {
+  status: number;
+  retryable: boolean;
+  constructor(message: string, status: number, retryable = false) {
+    super(message);
+    this.status = status;
+    this.retryable = retryable;
+  }
 }
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -639,16 +652,16 @@ ${formatTrainingNotes(notes)}`;
  */
 async function interpretAudience(brief: string, userId: string): Promise<Record<string, unknown>> {
   if (!brief || typeof brief !== "string") {
-    throw new Error("brief is required");
+    throw new AudienceActionError("brief is required", 400);
   }
   const trimmed = brief.trim();
-  if (trimmed.length < 10) throw new Error("Brief must be at least 10 characters");
-  if (trimmed.length > BRIEF_MAX_LENGTH) throw new Error(`Brief exceeds ${BRIEF_MAX_LENGTH} characters`);
+  if (trimmed.length < 10) throw new AudienceActionError("Brief must be at least 10 characters", 400);
+  if (trimmed.length > BRIEF_MAX_LENGTH) throw new AudienceActionError(`Brief exceeds ${BRIEF_MAX_LENGTH} characters`, 400);
 
   // Blocker 3: PII guard — reject before sending to AI or storing
   const piiFound = detectPiiPatterns(trimmed);
   if (piiFound.length > 0) {
-    throw new Error(piiRejectionMessage(piiFound));
+    throw new AudienceActionError(piiRejectionMessage(piiFound), 422);
   }
 
   // Build the vocabulary context — the ONLY CRM data the model sees
@@ -689,8 +702,9 @@ async function interpretAudience(brief: string, userId: string): Promise<Record<
   // Validate — reject on ANY invalid/injection-shaped output, never clean up
   const errors = validateAudienceSpec(parsed);
   if (errors.length > 0) {
-    throw new Error(
+    throw new AudienceActionError(
       `Invalid model output: ${errors.map((e) => `${e.field}: ${e.message}`).join("; ")}`,
+      422,
     );
   }
 
@@ -706,6 +720,7 @@ async function interpretAudience(brief: string, userId: string): Promise<Record<
       p_spec: spec,
       p_spec_hash: hash,
       p_model_id: modelId,
+      p_privacy_screen_version: PRIVACY_SCREEN_VERSION,
     },
   );
   if (interpErr) {
@@ -758,16 +773,16 @@ async function resolveAudience(
       .select("user_id, spec, spec_hash, model_id, brief, expires_at, consumed_at")
       .eq("id", interpretationId)
       .single();
-    if (interpErr || !interp) throw new Error("Interpretation not found");
-    if (interp.user_id !== userId) throw new Error("Interpretation belongs to a different user");
-    if (interp.consumed_at) throw new Error("Interpretation already consumed");
-    if (new Date(interp.expires_at as string) < new Date()) throw new Error("Interpretation has expired");
+    if (interpErr || !interp) throw new AudienceActionError("Interpretation not found", 404);
+    if (interp.user_id !== userId) throw new AudienceActionError("Interpretation belongs to a different user", 403);
+    if (interp.consumed_at) throw new AudienceActionError("Interpretation already consumed", 409);
+    if (new Date(interp.expires_at as string) < new Date()) throw new AudienceActionError("Interpretation has expired", 409);
 
     spec = interp.spec as AudienceSpecV1;
     hash = interp.spec_hash as string;
   } else {
     // Manual path: spec from client, model_id forced to 'manual'
-    if (!clientSpec) throw new Error("spec is required for manual resolution");
+    if (!clientSpec) throw new AudienceActionError("spec is required for manual resolution", 400);
     spec = clientSpec;
     hash = await specHash(spec);
   }
@@ -775,10 +790,10 @@ async function resolveAudience(
   // 1. Validate spec server-side
   const specErrors = validateAudienceSpec(spec);
   if (specErrors.length > 0) {
-    throw new Error(`Invalid spec: ${specErrors.map((e) => e.message).join("; ")}`);
+    throw new AudienceActionError(`Invalid spec: ${specErrors.map((e) => e.message).join("; ")}`, 400);
   }
   if (isUnfilteredSpec(spec) && !confirmUnfiltered) {
-    throw new Error("Spec has no active filters and would match all contacts. Pass confirm_unfiltered: true to proceed.");
+    throw new AudienceActionError("Spec has no active filters and would match all contacts. Pass confirm_unfiltered: true to proceed.", 400);
   }
 
   const userDb = callerClient(authHeader);
@@ -917,14 +932,16 @@ async function resolveAudience(
           isNonmatch = true;
         }
       }
+      let matchedStateCode: string | null = null;
       if (stateSet && !isNonmatch) {
-        const hasBilling = !!a.billing_state;
-        const hasMailing = !!c.mailing_state;
-        const billingMatch = hasBilling && stateSet.has(a.billing_state!.toUpperCase());
-        const mailingMatch = hasMailing && stateSet.has(c.mailing_state!.toUpperCase());
-        if ((hasBilling || hasMailing) && !billingMatch && !mailingMatch) {
+        const billingCode = canonicalizeStateCode(a.billing_state);
+        const mailingCode = canonicalizeStateCode(c.mailing_state);
+        const billingMatch = billingCode && stateSet.has(billingCode);
+        const mailingMatch = mailingCode && stateSet.has(mailingCode);
+        if ((billingCode || mailingCode) && !billingMatch && !mailingMatch) {
           isNonmatch = true;
         }
+        matchedStateCode = billingMatch ? billingCode : mailingMatch ? mailingCode : null;
       }
 
       if (isNonmatch) continue;
@@ -956,7 +973,27 @@ async function resolveAudience(
       if (existingIdx !== undefined) {
         totalDuplicateContacts++;
         const canonical = members[existingIdx];
-        canonical.reason_codes.push(`duplicate_contact:${c.id}:${a.id}`);
+        // Union ALL safety-relevant reasons from this duplicate contact
+        // into the canonical member. Any exclusion on ANY duplicate
+        // prevents eligibility (customer, partner, DNC, etc.).
+        for (const r of reasons) {
+          if (!canonical.reason_codes.includes(r)) canonical.reason_codes.push(r);
+        }
+        if (isAmbiguous && canonical.disposition === "eligible") {
+          canonical.disposition = "ambiguous";
+        }
+        const hasExclusions = canonical.reason_codes.some((r) =>
+          r === "customer_account" || r === "former_customer_account" ||
+          r === "partner_account" || r === "contact_do_not_contact" ||
+          r === "account_do_not_contact" || r === "contact_no_longer_employed"
+        );
+        if (hasExclusions && canonical.disposition !== "excluded") {
+          canonical.disposition = "excluded";
+        }
+        // Count without embedding contact/account IDs in reason strings
+        if (!canonical.reason_codes.includes("duplicate_contact")) {
+          canonical.reason_codes.push("duplicate_contact");
+        }
         continue;
       }
 
@@ -965,7 +1002,9 @@ async function resolveAudience(
         r === "partner_account" || r === "contact_do_not_contact" ||
         r === "account_do_not_contact" || r === "contact_no_longer_employed"
       );
-      const disposition = isAmbiguous ? "ambiguous" : hasExclusions ? "excluded" : "eligible";
+      // Deterministic precedence: excluded > ambiguous > eligible.
+      // Exclusion safety always outranks ambiguity.
+      const disposition = hasExclusions ? "excluded" : isAmbiguous ? "ambiguous" : "eligible";
 
       seenEmails.set(primaryEmail, members.length);
       members.push({
@@ -976,7 +1015,7 @@ async function resolveAudience(
         reason_codes: reasons,
         snapshot_industry_category: a.industry_category,
         snapshot_project_segment: a.project_segment,
-        snapshot_state: a.billing_state ?? c.mailing_state,
+        snapshot_state: matchedStateCode ?? canonicalizeStateCode(a.billing_state) ?? canonicalizeStateCode(c.mailing_state),
         snapshot_customer_status: a.customer_status,
         snapshot_account_type: a.account_type,
         snapshot_account_name: a.name,
@@ -1000,18 +1039,19 @@ async function resolveAudience(
     }
   }
 
-  // 4. Service-role checks: suppression + active enrollments
-  const eligibleEmails = members
-    .filter((m) => m.disposition === "eligible")
-    .map((m) => m.email_normalized);
+  // 4. Service-role checks: suppression + active enrollments.
+  //    Run against ALL matched canonical emails (not just eligible) so
+  //    an ambiguous unsubscribed/bounced record is recorded as excluded,
+  //    and active enrollment is surfaced consistently.
+  const allMatchedEmails = members.map((m) => m.email_normalized);
 
   // Suppression check (batched + paginated)
   const suppressionMap = new Map<string, string[]>();
-  if (eligibleEmails.length > 0) {
+  if (allMatchedEmails.length > 0) {
     const BATCH = 500;
     const PAGE = 1000;
-    for (let i = 0; i < eligibleEmails.length; i += BATCH) {
-      const batch = eligibleEmails.slice(i, i + BATCH);
+    for (let i = 0; i < allMatchedEmails.length; i += BATCH) {
+      const batch = allMatchedEmails.slice(i, i + BATCH);
       for (let from = 0; ; from += PAGE) {
         const { data, error } = await svc
           .from("v_marketing_suppression")
@@ -1038,10 +1078,10 @@ async function resolveAudience(
   // Blocker 4: case-insensitive enrollment matching via normalized RPC
   // (uses lower(trim()) + functional index, not raw .in())
   const activeEnrollmentEmails = new Set<string>();
-  if (eligibleEmails.length > 0) {
+  if (allMatchedEmails.length > 0) {
     const BATCH = 500;
-    for (let i = 0; i < eligibleEmails.length; i += BATCH) {
-      const batch = eligibleEmails.slice(i, i + BATCH);
+    for (let i = 0; i < allMatchedEmails.length; i += BATCH) {
+      const batch = allMatchedEmails.slice(i, i + BATCH);
       const { data, error } = await svc.rpc(
         "check_active_enrollments_normalized",
         { p_emails: batch },
@@ -1054,19 +1094,44 @@ async function resolveAudience(
     }
   }
 
-  // Apply suppression + enrollment to eligible members
+  // Apply suppression + enrollment to ALL matched members, then enforce
+  // deterministic precedence: excluded > active_enrollment > ambiguous > eligible.
+  // A member already marked ambiguous but also suppressed becomes excluded.
   for (const m of members) {
-    if (m.disposition !== "eligible") continue;
     const suppReasons = suppressionMap.get(m.email_normalized);
     if (suppReasons?.length) {
-      m.disposition = "excluded";
-      m.reason_codes.push(...suppReasons);
-      continue;
+      for (const r of suppReasons) {
+        if (!m.reason_codes.includes(r)) m.reason_codes.push(r);
+      }
     }
-    if (activeEnrollmentEmails.has(m.email_normalized)) {
-      m.disposition = "active_enrollment";
+    const hasEnrollment = activeEnrollmentEmails.has(m.email_normalized);
+    if (hasEnrollment && !m.reason_codes.includes("active_enrollment_elsewhere")) {
       m.reason_codes.push("active_enrollment_elsewhere");
     }
+
+    // Re-derive disposition with deterministic precedence.
+    // v_marketing_suppression is authoritative: ANY row it returns is an
+    // exclusion, regardless of reason string (covers lead_do_not_market_to,
+    // lead_do_not_contact, lead_avoid, lead_archived, and any future
+    // suppression branches). Direct contact/account flags are also explicit.
+    const isSuppressed = suppressionMap.has(m.email_normalized);
+    const hasDirectExclusion = m.reason_codes.some((r) =>
+      r === "customer_account" || r === "former_customer_account" ||
+      r === "partner_account" || r === "contact_do_not_contact" ||
+      r === "account_do_not_contact" || r === "contact_no_longer_employed"
+    );
+    const hasAmbiguity = m.reason_codes.some((r) =>
+      r === "no_industry_category_set" || r === "no_project_segment_set" || r === "no_state_set"
+    );
+
+    if (isSuppressed || hasDirectExclusion) {
+      m.disposition = "excluded";
+    } else if (hasEnrollment) {
+      m.disposition = "active_enrollment";
+    } else if (hasAmbiguity) {
+      m.disposition = "ambiguous";
+    }
+    // else stays "eligible"
   }
 
   // 5. Apply max_results cap
@@ -1152,13 +1217,212 @@ async function resolveAudience(
   };
 }
 
+// ── AI Audience: generate-audience-draft ───────────────────────────────
+//
+// Narrowly scoped rep-safe draft generation action.  Produces exactly
+// three emails from a bounded description.  Pure callClaude: zero DB
+// writes, zero Smartlead calls, zero enrollment/send side effects.
+// Separate from admin-only generate-campaign so the admin action stays
+// unchanged and this one can never widen past its strict contract.
+
+// 2500 accommodates a 2000-char brief + ~500 chars of wrapper context
+// from handleAiAudienceComplete. Matches BRIEF_MAX_LENGTH (2000) + margin.
+const AUDIENCE_DRAFT_MAX_DESC = 2500;
+const AUDIENCE_DRAFT_MIN_DESC = 20;
+const AUDIENCE_DRAFT_REQUIRED_EMAILS = 3;
+
+/** Reject unsafe HTML patterns in AI-generated email content. */
+function containsUnsafeHtml(html: string): boolean {
+  const lower = html.toLowerCase();
+  if (/<script[\s>]/i.test(lower)) return true;
+  if (/<style[\s>]/i.test(lower)) return true;
+  if (/<iframe[\s>]/i.test(lower)) return true;
+  if (/\bon\w+\s*=/i.test(html)) return true; // event handlers (onclick, onerror, etc.)
+  if (/javascript\s*:/i.test(html)) return true;
+  if (/data\s*:\s*text\/html/i.test(html)) return true;
+  return false;
+}
+
+const AUDIENCE_DRAFT_MAX_SUBJECT = 200;
+const AUDIENCE_DRAFT_MAX_BODY = 10000;
+const AUDIENCE_DRAFT_MAX_NAME = 200;
+const AUDIENCE_DRAFT_MAX_DELAY = 90;
+
+async function generateAudienceDraft(description: string): Promise<Record<string, unknown>> {
+  if (!description || typeof description !== "string") {
+    throw new AudienceActionError("description is required", 400);
+  }
+  const trimmed = description.trim();
+  if (trimmed.length < AUDIENCE_DRAFT_MIN_DESC) {
+    throw new AudienceActionError(`Description must be at least ${AUDIENCE_DRAFT_MIN_DESC} characters`, 400);
+  }
+  if (trimmed.length > AUDIENCE_DRAFT_MAX_DESC) {
+    throw new AudienceActionError(`Description exceeds ${AUDIENCE_DRAFT_MAX_DESC} characters`, 400);
+  }
+
+  // PII guard: callers can bypass interpret-audience and call this directly
+  const piiFound = detectPiiPatterns(trimmed);
+  if (piiFound.length > 0) {
+    throw new AudienceActionError(piiRejectionMessage(piiFound), 422);
+  }
+
+  // Training-note reads are permitted (read-only context for generation).
+  // No other DB writes occur in this function.
+  const notes = await allTrainingNotes();
+  const text = await callClaude({
+    model: PLAYBOOK_IDEAS_MODEL,
+    system: campaignGenerateSystem(formatTrainingNotes(notes)),
+    user: trimmed,
+    maxTokens: 4000,
+    temperature: 0.7,
+  });
+  const parsed = parseJsonResponse(text);
+
+  // ── Strict output validation ──────────────────────────────────────
+  // Must produce exactly 3 emails with all required fields in safe ranges.
+
+  // campaign_name / target_audience
+  if (typeof parsed.campaign_name !== "string" || !parsed.campaign_name.trim()) {
+    throw new AudienceActionError("AI returned empty campaign_name", 422);
+  }
+  if (parsed.campaign_name.length > AUDIENCE_DRAFT_MAX_NAME) {
+    throw new AudienceActionError(`AI returned campaign_name exceeding ${AUDIENCE_DRAFT_MAX_NAME} characters`, 422);
+  }
+  if (typeof parsed.target_audience !== "string" || !parsed.target_audience.trim()) {
+    throw new AudienceActionError("AI returned empty target_audience", 422);
+  }
+  if (parsed.target_audience.length > AUDIENCE_DRAFT_MAX_NAME) {
+    throw new AudienceActionError(`AI returned target_audience exceeding ${AUDIENCE_DRAFT_MAX_NAME} characters`, 422);
+  }
+
+  // sequence
+  if (!Array.isArray(parsed.sequence)) {
+    throw new AudienceActionError("AI returned invalid campaign structure", 422);
+  }
+  if (parsed.sequence.length !== AUDIENCE_DRAFT_REQUIRED_EMAILS) {
+    throw new AudienceActionError(`AI must produce exactly ${AUDIENCE_DRAFT_REQUIRED_EMAILS} emails, got ${parsed.sequence.length}`, 422);
+  }
+  for (let i = 0; i < parsed.sequence.length; i++) {
+    const email = parsed.sequence[i] as Record<string, unknown>;
+    const n = i + 1;
+
+    // seq_number must be exactly 1, 2, 3
+    if (email.seq_number !== n) throw new AudienceActionError(`Email ${n} must have seq_number ${n}, got ${email.seq_number}`, 422);
+
+    // delay_days: integer in safe range
+    if (typeof email.delay_days !== "number" || !Number.isInteger(email.delay_days)) throw new AudienceActionError(`Email ${n} delay_days must be an integer`, 422);
+    if (email.delay_days < 0 || email.delay_days > AUDIENCE_DRAFT_MAX_DELAY) throw new AudienceActionError(`Email ${n} delay_days out of range (0-${AUDIENCE_DRAFT_MAX_DELAY})`, 422);
+
+    // subject: nonempty, bounded
+    if (typeof email.subject !== "string" || !email.subject.trim()) throw new AudienceActionError(`Email ${n} missing subject`, 422);
+    if ((email.subject as string).length > AUDIENCE_DRAFT_MAX_SUBJECT) throw new AudienceActionError(`Email ${n} subject exceeds ${AUDIENCE_DRAFT_MAX_SUBJECT} characters`, 422);
+
+    // body_html: nonempty, bounded, no unsafe content
+    if (typeof email.body_html !== "string" || !email.body_html.trim()) throw new AudienceActionError(`Email ${n} missing body`, 422);
+    if ((email.body_html as string).length > AUDIENCE_DRAFT_MAX_BODY) throw new AudienceActionError(`Email ${n} body exceeds ${AUDIENCE_DRAFT_MAX_BODY} characters`, 422);
+    if (containsUnsafeHtml(email.body_html as string)) throw new AudienceActionError(`Email ${n} contains unsafe HTML (script/style/iframe/event-handler/javascript URL)`, 422);
+
+    // Require visible text content (not just HTML tags)
+    const visibleText = (email.body_html as string).replace(/<[^>]+>/g, "").replace(/&\w+;/g, " ").trim();
+    if (!visibleText) throw new AudienceActionError(`Email ${n} body has no visible text content`, 422);
+  }
+
+  // No DB writes, no Smartlead, no enrollment — pure generation only.
+  // (allTrainingNotes above is a read-only DB call for generation context.)
+  return { success: true, campaign: parsed };
+}
+
 // ── HTTP handler ─────────────────────────────────────────────────────────
 
 /** Actions open to all authenticated users for AI audience features only.
  *  All other actions (ideas/insights/training/analyze) stay admin-only. */
+/**
+ * Link a resolved audience run to a saved campaign draft. Narrow rep-safe
+ * action: verifies caller owns BOTH the run and the draft before linking
+ * via the service-role RPC. Transitions run status preview -> draft_linked.
+ * Idempotent: re-linking the same pair is a no-op.
+ */
+async function linkAudienceDraft(
+  runId: string,
+  draftId: string,
+  userId: string,
+): Promise<Record<string, unknown>> {
+  if (!runId || typeof runId !== "string") throw new AudienceActionError("run_id is required", 400);
+  if (!draftId || typeof draftId !== "string") throw new AudienceActionError("draft_id is required", 400);
+
+  // Verify caller owns the run
+  const { data: run, error: runErr } = await svc
+    .from("campaign_audience_runs")
+    .select("id, user_id, status, draft_id")
+    .eq("id", runId)
+    .single();
+  if (runErr || !run) throw new AudienceActionError("Audience run not found", 404);
+  if (run.user_id !== userId) throw new AudienceActionError("You do not own this audience run", 403);
+
+  // Idempotent: already linked to this draft
+  if (run.status === "draft_linked" && run.draft_id === draftId) {
+    return { success: true, already_linked: true };
+  }
+
+  // Verify caller owns the draft
+  const { data: draft, error: draftErr } = await svc
+    .from("campaign_drafts")
+    .select("id, user_id")
+    .eq("id", draftId)
+    .single();
+  if (draftErr || !draft) throw new AudienceActionError("Draft not found", 404);
+  if (draft.user_id !== userId) throw new AudienceActionError("You do not own this draft", 403);
+
+  // Link via service-role RPC
+  const { error: linkErr } = await svc.rpc("audience_run_set_status", {
+    p_run_id: runId,
+    p_new_status: "draft_linked",
+    p_draft_id: draftId,
+  });
+  if (linkErr) throw new Error("Failed to link audience to draft: " + linkErr.message);
+
+  return { success: true };
+}
+
+/**
+ * Expire an audience run when an AI draft is explicitly discarded.
+ * Owner-checked: caller must own the run. Only transitions from
+ * preview or draft_linked to expired. Failure warns but does not
+ * resurrect the draft.
+ */
+async function expireAudienceRun(
+  runId: string,
+  userId: string,
+): Promise<Record<string, unknown>> {
+  if (!runId || typeof runId !== "string") throw new AudienceActionError("run_id is required", 400);
+
+  const { data: run, error: runErr } = await svc
+    .from("campaign_audience_runs")
+    .select("id, user_id, status")
+    .eq("id", runId)
+    .single();
+  if (runErr || !run) throw new AudienceActionError("Audience run not found", 404);
+  if (run.user_id !== userId) throw new AudienceActionError("You do not own this audience run", 403);
+  if (run.status === "expired") return { success: true, already_expired: true };
+  if (run.status !== "preview" && run.status !== "draft_linked") {
+    throw new AudienceActionError(`Cannot expire run in status: ${run.status}`, 409);
+  }
+
+  const { error: expErr } = await svc.rpc("audience_run_set_status", {
+    p_run_id: runId,
+    p_new_status: "expired",
+  });
+  if (expErr) throw new Error("Failed to expire audience run: " + expErr.message);
+
+  return { success: true };
+}
+
 const REP_ELIGIBLE_AI_ACTIONS = new Set([
   "interpret-audience",
   "resolve-audience",
+  "generate-audience-draft",
+  "link-audience-draft",
+  "expire-audience-run",
 ]);
 
 Deno.serve(async (req) => {
@@ -1203,6 +1467,19 @@ Deno.serve(async (req) => {
     }
 
     // ── AI Audience actions ────────────────────────────────────────────
+    if (action === "generate-audience-draft") {
+      return json(await generateAudienceDraft(body.description ?? ""));
+    }
+    if (action === "link-audience-draft") {
+      const uid = await callerUserId(auth);
+      if (!uid) return json({ error: "Sign in required" }, 401);
+      return json(await linkAudienceDraft(body.run_id ?? "", body.draft_id ?? "", uid));
+    }
+    if (action === "expire-audience-run") {
+      const uid = await callerUserId(auth);
+      if (!uid) return json({ error: "Sign in required" }, 401);
+      return json(await expireAudienceRun(body.run_id ?? "", uid));
+    }
     if (action === "interpret-audience") {
       const uid = await callerUserId(auth);
       if (!uid) return json({ error: "Sign in required" }, 401);
@@ -1232,6 +1509,9 @@ Deno.serve(async (req) => {
 
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {
+    if (e instanceof AudienceActionError) {
+      return json({ error: e.message, retryable: e.retryable }, e.status);
+    }
     return json({ error: (e as Error).message }, 500);
   }
 });
