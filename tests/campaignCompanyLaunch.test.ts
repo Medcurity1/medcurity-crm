@@ -24,6 +24,7 @@ describe("company-wide Campaigns launch", () => {
     expect(contacts).toContain("Add to a campaign…");
     expect(contacts).toContain("addCampaignForIds");
     expect(contacts).toContain("fetchCampaignContactsByIds");
+    expect(contacts).toContain("campaignContactsLoading || selectedIds.size === 0");
     expect(detail).toContain("Start a Campaign");
     expect(detail).toContain("Add to Campaign");
     expect(lists).toContain("startWholeListCampaign");

@@ -718,7 +718,7 @@ export function ContactsList() {
         <Button
           variant="outline"
           size="sm"
-          disabled={campaignContactsLoading}
+          disabled={campaignContactsLoading || selectedIds.size === 0}
           onClick={() => void openCampaignForIds(Array.from(selectedIds))}
         >
           <Megaphone className="h-4 w-4 mr-1" />
