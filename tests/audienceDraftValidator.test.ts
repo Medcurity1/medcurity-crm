@@ -1052,3 +1052,62 @@ describe("generator source consumes no model-authored visible string", () => {
     expect(prompt).not.toContain('"target_audience"');
   });
 });
+
+// ── Error message reflection safety ───────────────────────────────────
+
+describe("generateAudienceDraft errors never reflect model-provided values", () => {
+  const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+  const fn = edgeFn.slice(
+    edgeFn.indexOf("async function generateAudienceDraft"),
+    edgeFn.indexOf("// ── HTTP handler"),
+  );
+
+  it("theme validation error does not echo the provided theme_id", () => {
+    expect(fn).toContain("Invalid theme selection");
+    expect(fn).not.toMatch(/Unknown theme_id "\$\{/);
+    expect(fn).not.toMatch(/theme_id "\$\{themeId\}"/);
+  });
+
+  it("subject_id error does not echo the provided ID", () => {
+    expect(fn).toContain("invalid subject selection");
+    expect(fn).not.toMatch(/unknown subject_id "\$\{/);
+  });
+
+  it("message_id error does not echo the provided ID", () => {
+    expect(fn).toContain("invalid message selection");
+    expect(fn).not.toMatch(/unknown message_id "\$\{/);
+  });
+
+  it("cta_id error does not echo the provided ID", () => {
+    expect(fn).toContain("invalid CTA selection");
+    expect(fn).not.toMatch(/unknown cta_id "\$\{/);
+  });
+
+  it("position errors do not echo subject/message IDs", () => {
+    expect(fn).toContain("wrong-position subject selection");
+    expect(fn).toContain("wrong-position message selection");
+    expect(fn).not.toMatch(/subject_id "\$\{subjectId\}"/);
+    expect(fn).not.toMatch(/message_id "\$\{messageId\}"/);
+  });
+
+  it("no AudienceActionError in the function interpolates subjectId/messageId/ctaId/themeId", () => {
+    // Extract all AudienceActionError throw lines
+    const errorLines = fn.split("\n").filter((l: string) => l.includes("AudienceActionError"));
+    for (const line of errorLines) {
+      expect(line).not.toContain("${subjectId}");
+      expect(line).not.toContain("${messageId}");
+      expect(line).not.toContain("${ctaId}");
+      expect(line).not.toContain("${themeId}");
+    }
+  });
+
+  it("malicious long prose ID would not appear in error response", () => {
+    // Simulate: if model returns subject_id = "<script>alert(1)</script>xss_payload_long_string..."
+    // The error message should be "Email 1: invalid subject selection", not contain the payload
+    const maliciousId = '<script>alert(1)</script>' + 'A'.repeat(1000);
+    // The code does String(raw.subject_id ?? "") then checks SUBJECT_MAP[subjectId]
+    // which will be falsy, producing "Email 1: invalid subject selection"
+    // Verify the error template is fixed text
+    expect(fn).toMatch(/throw new AudienceActionError\(`Email \$\{n\}: invalid subject selection`/);
+  });
+});

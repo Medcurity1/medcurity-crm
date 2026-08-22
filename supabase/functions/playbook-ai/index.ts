@@ -1278,9 +1278,10 @@ async function generateAudienceDraft(description: string): Promise<Record<string
   }
 
   // ── Validate theme_id (server derives campaign_name) ───────────
+  // Never reflect model-provided values in error messages.
   const themeId = String(parsed.theme_id ?? "");
   if (!THEME_MAP[themeId]) {
-    throw new AudienceActionError(`Unknown theme_id "${themeId}"`, 422);
+    throw new AudienceActionError("Invalid theme selection", 422);
   }
 
   if (!Array.isArray(parsed.sequence) || parsed.sequence.length !== 3) {
@@ -1288,28 +1289,29 @@ async function generateAudienceDraft(description: string): Promise<Record<string
   }
 
   // ── Validate IDs and server-render ────────────────────────────
+  // Error messages use only server-owned text (Email N + fixed
+  // description). No model-provided ID/value/fragment is reflected.
   const renderedSequence = [];
   for (let i = 0; i < 3; i++) {
     const raw = parsed.sequence[i] as Record<string, unknown>;
     if (!raw || typeof raw !== "object") {
-      throw new AudienceActionError(`Email ${i + 1}: entry is null or not an object`, 422);
+      throw new AudienceActionError(`Email ${i + 1}: invalid entry`, 422);
     }
     const n = i + 1;
-    if (raw.seq_number !== n) throw new AudienceActionError(`Email ${n}: seq_number must be ${n}`, 422);
-    if (typeof raw.delay_days !== "number" || !Number.isInteger(raw.delay_days)) throw new AudienceActionError(`Email ${n}: delay_days must be an integer`, 422);
-    if (n === 1 && raw.delay_days !== 0) throw new AudienceActionError(`Email ${n}: first email delay_days must be 0`, 422);
-    if (n > 1 && (raw.delay_days < 3 || raw.delay_days > 4)) throw new AudienceActionError(`Email ${n}: follow-up delay_days must be 3-4`, 422);
+    if (raw.seq_number !== n) throw new AudienceActionError(`Email ${n}: invalid sequence number`, 422);
+    if (typeof raw.delay_days !== "number" || !Number.isInteger(raw.delay_days)) throw new AudienceActionError(`Email ${n}: delay must be an integer`, 422);
+    if (n === 1 && raw.delay_days !== 0) throw new AudienceActionError(`Email ${n}: first email delay must be 0`, 422);
+    if (n > 1 && (raw.delay_days < 3 || raw.delay_days > 4)) throw new AudienceActionError(`Email ${n}: follow-up delay must be 3 or 4`, 422);
 
-    // Validate IDs against server-owned allowlists
+    // Validate IDs against server-owned allowlists (no reflection)
     const subjectId = String(raw.subject_id ?? "");
     const messageId = String(raw.message_id ?? "");
-    const ctaId = String(raw.cta_id ?? "reply_to_learn_more");
-    if (!SUBJECT_MAP[subjectId]) throw new AudienceActionError(`Email ${n}: unknown subject_id "${subjectId}"`, 422);
-    if (!MESSAGE_MAP[messageId]) throw new AudienceActionError(`Email ${n}: unknown message_id "${messageId}"`, 422);
-    if (!CTA_MAP[ctaId]) throw new AudienceActionError(`Email ${n}: unknown cta_id "${ctaId}"`, 422);
-    // Position compatibility
-    if (SUBJECT_MAP[subjectId].position !== n) throw new AudienceActionError(`Email ${n}: subject_id "${subjectId}" is for position ${SUBJECT_MAP[subjectId].position}`, 422);
-    if (MESSAGE_MAP[messageId].position !== n) throw new AudienceActionError(`Email ${n}: message_id "${messageId}" is for position ${MESSAGE_MAP[messageId].position}`, 422);
+    const ctaId = String(raw.cta_id ?? "");
+    if (!SUBJECT_MAP[subjectId]) throw new AudienceActionError(`Email ${n}: invalid subject selection`, 422);
+    if (!MESSAGE_MAP[messageId]) throw new AudienceActionError(`Email ${n}: invalid message selection`, 422);
+    if (!CTA_MAP[ctaId]) throw new AudienceActionError(`Email ${n}: invalid CTA selection`, 422);
+    if (SUBJECT_MAP[subjectId].position !== n) throw new AudienceActionError(`Email ${n}: wrong-position subject selection`, 422);
+    if (MESSAGE_MAP[messageId].position !== n) throw new AudienceActionError(`Email ${n}: wrong-position message selection`, 422);
 
     // Server renders everything from server-owned maps. No model text in output.
     const rendered = renderAudienceDraftEmail(subjectId, messageId, ctaId);
