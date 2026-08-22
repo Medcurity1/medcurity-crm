@@ -133,7 +133,8 @@ describe("template preview modal layout", () => {
   });
 
   it("preserves Escape/close behavior via standard Dialog/DialogContent", () => {
-    expect(section).toContain("onOpenChange={(o) => !o && setPreview(null)}");
+    expect(section).toContain("onOpenChange={(o) => {");
+    expect(section).toContain("setPreview(null)");
     expect(section).toContain("<DialogContent");
   });
 
@@ -358,5 +359,48 @@ describe("overflow-x-hidden defense", () => {
 
   it("applies overflow-x-hidden to the scrollable body section", () => {
     expect(section).toContain("overflow-x-hidden");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Accessibility: preview dialog focus restoration
+// ---------------------------------------------------------------------------
+
+describe("preview dialog focus restoration", () => {
+  const section = read("src", "features", "playbook", "TemplatesSection.tsx");
+
+  it("stores a previewTriggerRef via useRef", () => {
+    expect(section).toContain("useRef<HTMLElement | null>(null)");
+    expect(section).toContain("previewTriggerRef");
+  });
+
+  it("captures the triggering card element on click", () => {
+    // The card's onClick must store e.currentTarget in the ref before opening the preview
+    expect(section).toContain("previewTriggerRef.current = e.currentTarget");
+    expect(section).toContain("setPreview(t)");
+  });
+
+  it("restores focus via requestAnimationFrame on user-initiated close", () => {
+    // onOpenChange fires only for Escape / X / overlay — not programmatic setPreview(null)
+    expect(section).toContain("requestAnimationFrame(() => trigger.focus())");
+  });
+
+  it("does NOT call focus restore in programmatic transition paths", () => {
+    // openCustomize, openEdit, and "Use this template" call setPreview(null)
+    // directly, which changes `open` without firing onOpenChange — so the
+    // requestAnimationFrame focus restore never runs for those paths.
+    // Verify: the three transition paths set preview to null outside onOpenChange.
+    const onOpenChangeBlock = section.slice(
+      section.indexOf("onOpenChange={(o) => {"),
+      section.indexOf("onOpenChange={(o) => {") + 300,
+    );
+    // The onOpenChange block should NOT contain openCustomize/openEdit/openLaunch
+    expect(onOpenChangeBlock).not.toContain("openCustomize");
+    expect(onOpenChangeBlock).not.toContain("openEdit");
+    expect(onOpenChangeBlock).not.toContain("openLaunch");
+  });
+
+  it("imports useRef from react", () => {
+    expect(section).toMatch(/import\s*\{[^}]*useRef[^}]*\}\s*from\s*["']react["']/);
   });
 });

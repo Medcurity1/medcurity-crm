@@ -7,7 +7,7 @@
 // instance in `mode="template"` — this component owns that instance since
 // it's the one place both launch triggers converge.
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Wand2, Clock, Layers, ArrowRight, Pencil, Copy, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +51,14 @@ export function TemplatesSection({
   const smartleadDisabled = sl?.configured === false;
   const del = useDeleteTemplate();
   const [preview, setPreview] = useState<CampaignTemplate | null>(null);
+  // Focus restoration: Radix Dialog doesn't know which element opened the
+  // preview (no DialogTrigger), so focus falls to <body> on close.  We
+  // capture the card that was clicked and restore focus in onOpenChange,
+  // which only fires for USER-initiated closes (Escape / X / overlay click).
+  // Programmatic transitions (Customize / Edit / Use) call setPreview(null)
+  // directly — that changes `open` without firing onOpenChange, so focus
+  // is left to the subsequent dialog that opens.
+  const previewTriggerRef = useRef<HTMLElement | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorSeed, setEditorSeed] = useState<EditorSeed>(null);
   const [deleteTarget, setDeleteTarget] = useState<CampaignTemplate | null>(null);
@@ -138,7 +146,7 @@ export function TemplatesSection({
                 type="button"
                 key={t.id}
                 className="camp-row camp-row--clickable w-full text-left"
-                onClick={() => setPreview(t)}
+                onClick={(e) => { previewTriggerRef.current = e.currentTarget; setPreview(t); }}
               >
                 <div className={cn("h-1.5 w-full bg-gradient-to-r", cat.accent)} />
                 <div className="p-3 space-y-2 min-w-0">
@@ -185,7 +193,13 @@ export function TemplatesSection({
       {/* Template preview dialog — bounded workspace with fixed header/footer
           and internal-only vertical scroll so the sequence body never pushes
           action buttons off-screen (fixes 8-Touch at 390×844). */}
-      <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
+      <Dialog open={!!preview} onOpenChange={(o) => {
+        if (!o) {
+          setPreview(null);
+          const trigger = previewTriggerRef.current;
+          if (trigger) requestAnimationFrame(() => trigger.focus());
+        }
+      }}>
         <DialogContent className="camp-scope camp-shell sm:max-w-3xl lg:max-w-4xl w-[calc(100vw-2rem)] max-h-[85vh] flex flex-col p-0 overflow-x-hidden">
           {preview && (
             <>
