@@ -789,7 +789,18 @@ async function resolveAudience(
       .single();
     if (interpErr || !interp) throw new AudienceActionError("Interpretation not found", 404);
     if (interp.user_id !== userId) throw new AudienceActionError("Interpretation belongs to a different user", 403);
-    if (interp.consumed_at) throw new AudienceActionError("Interpretation already consumed", 409);
+    if (interp.consumed_at) {
+      // Response-loss recovery: if interpretation was already consumed by
+      // a run owned by this user, return that existing run instead of 409.
+      const { data: existingRun } = await svc.rpc("audience_get_consumed_run", {
+        p_interpretation_id: interpretationId,
+        p_user_id: userId,
+      });
+      if (existingRun) {
+        return existingRun as Record<string, unknown>;
+      }
+      throw new AudienceActionError("Interpretation already consumed", 409);
+    }
     if (new Date(interp.expires_at as string) < new Date()) throw new AudienceActionError("Interpretation has expired", 409);
 
     spec = interp.spec as AudienceSpecV1;
@@ -1044,60 +1055,31 @@ async function resolveAudience(
   //    Run against ALL matched canonical emails (not just eligible) so
   //    an ambiguous unsubscribed/bounced record is recorded as excluded,
   //    and active enrollment is surfaced consistently.
-  // Deduplicated email set for suppression/enrollment checks.
+  // Deduplicated email set for combined suppression + enrollment check.
   // Invariant: at most SCAN_HARD_CAP contacts * 3 emails = 30,000.
-  // Fail-closed if violated rather than silently skipping emails.
   const MAX_IDENTITY_EMAILS = SCAN_HARD_CAP * 3;
   if (allUniqueEmails.size > MAX_IDENTITY_EMAILS) {
     throw new Error(`Identity email count ${allUniqueEmails.size} exceeds invariant ${MAX_IDENTITY_EMAILS}`);
   }
   const allMatchedEmails = [...allUniqueEmails];
 
-  // Suppression check (batched + paginated)
+  // Combined suppression + enrollment in 1 set-based RPC call (replaces
+  // 120+ serial .in() GET requests). PostgreSQL accepts text[] up to 30k.
   const suppressionMap = new Map<string, string[]>();
-  if (allMatchedEmails.length > 0) {
-    const BATCH = 500;
-    const PAGE = 1000;
-    for (let i = 0; i < allMatchedEmails.length; i += BATCH) {
-      const batch = allMatchedEmails.slice(i, i + BATCH);
-      for (let from = 0; ; from += PAGE) {
-        const { data, error } = await svc
-          .from("v_marketing_suppression")
-          .select("email, reason")
-          .in("email", batch)
-          .order("email", { ascending: true })
-          .range(from, from + PAGE - 1);
-        if (error) throw new Error("Suppression check failed: " + error.message);
-        const rows = (data ?? []) as { email: string; reason: string }[];
-        for (const row of rows) {
-          const norm = normalizeEmail(row.email);
-          const existing = suppressionMap.get(norm);
-          if (existing) {
-            if (!existing.includes(row.reason)) existing.push(row.reason);
-          } else {
-            suppressionMap.set(norm, [row.reason]);
-          }
-        }
-        if (rows.length < PAGE) break;
-      }
-    }
-  }
-
-  // Blocker 4: case-insensitive enrollment matching via normalized RPC
-  // (uses lower(trim()) + functional index, not raw .in())
   const activeEnrollmentEmails = new Set<string>();
   if (allMatchedEmails.length > 0) {
-    const BATCH = 500;
-    for (let i = 0; i < allMatchedEmails.length; i += BATCH) {
-      const batch = allMatchedEmails.slice(i, i + BATCH);
-      const { data, error } = await svc.rpc(
-        "check_active_enrollments_normalized",
-        { p_emails: batch },
-      );
-      if (error) throw new Error("Enrollment check failed: " + error.message);
-      const matched = (data ?? []) as string[];
-      for (const email of matched) {
-        activeEnrollmentEmails.add(email);
+    const { data: safetyRows, error: safetyErr } = await svc.rpc(
+      "audience_check_email_safety",
+      { p_emails: allMatchedEmails },
+    );
+    if (safetyErr) throw new Error("Safety check failed");
+    for (const row of (safetyRows ?? []) as { email: string; suppression_reasons: string[]; active_enrollment: boolean }[]) {
+      const norm = normalizeEmail(row.email);
+      if (row.suppression_reasons?.length) {
+        suppressionMap.set(norm, row.suppression_reasons);
+      }
+      if (row.active_enrollment) {
+        activeEnrollmentEmails.add(norm);
       }
     }
   }
@@ -1182,6 +1164,8 @@ async function resolveAudience(
     total_ambiguous: counts.total_ambiguous,
     total_duplicate: counts.total_duplicate,
     total_active_enrollment: counts.total_active_enrollment,
+    total_scanned: counts.total_scanned,
+    scan_truncated: counts.scan_truncated,
   };
   const memberPayload = members.map((m) => ({
     contact_id: m.contact_id,
@@ -1204,7 +1188,18 @@ async function resolveAudience(
       p_interpretation_id: interpretationId,
     },
   );
-  if (rpcErr) throw new Error("Failed to persist audience provenance: " + rpcErr.message);
+  if (rpcErr) {
+    // Concurrent race: another request may have consumed the interpretation.
+    // Attempt owner-checked recovery before failing.
+    if (interpretationId) {
+      const { data: recovered } = await svc.rpc("audience_get_consumed_run", {
+        p_interpretation_id: interpretationId,
+        p_user_id: userId,
+      });
+      if (recovered) return recovered as Record<string, unknown>;
+    }
+    throw new Error("Failed to persist audience resolution");
+  }
 
   // 8. Response
   const preview = (m: MemberRow) => ({

@@ -1485,3 +1485,246 @@ describe("groupContactIdentities: performance at scale", () => {
     expect(groups[0].allEmails).toHaveLength(100);
   });
 });
+
+// ── Set-based safety RPC migration ────────────────────────────────────
+
+describe("audience_check_email_safety migration", () => {
+  const migration = read("supabase/migrations/20260822060000_audience_safety_check_rpc.sql");
+
+  it("creates audience_check_email_safety function", () => {
+    expect(migration).toContain("create or replace function public.audience_check_email_safety");
+    expect(migration).toContain("p_emails text[]");
+  });
+
+  it("returns email + suppression_reasons + active_enrollment", () => {
+    expect(migration).toContain("suppression_reasons text[]");
+    expect(migration).toContain("active_enrollment   boolean");
+  });
+
+  it("queries v_marketing_suppression and campaign_enrollments together", () => {
+    expect(migration).toContain("v_marketing_suppression");
+    expect(migration).toContain("campaign_enrollments");
+    expect(migration).toContain("full outer join");
+  });
+
+  it("is security_definer with search_path, service_role only", () => {
+    expect(migration).toContain("security definer");
+    expect(migration).toContain("set search_path = public");
+    expect(migration).toContain("revoke all on function public.audience_check_email_safety");
+    expect(migration).toContain("grant execute on function public.audience_check_email_safety");
+    expect(migration).toContain("to service_role");
+  });
+
+  it("revokes from public, anon, and authenticated", () => {
+    expect(migration).toContain("from public, anon, authenticated");
+  });
+
+  it("uses stable volatility (safe for read-only context)", () => {
+    expect(migration).toContain("stable");
+  });
+});
+
+describe("audience_get_consumed_run migration", () => {
+  const migration = read("supabase/migrations/20260822060000_audience_safety_check_rpc.sql");
+
+  it("creates owner-checked run snapshot retrieval", () => {
+    expect(migration).toContain("create or replace function public.audience_get_consumed_run");
+    expect(migration).toContain("p_interpretation_id uuid");
+    expect(migration).toContain("p_user_id uuid");
+  });
+
+  it("filters by both interpretation_id AND user_id", () => {
+    expect(migration).toContain("r.interpretation_id = p_interpretation_id");
+    expect(migration).toContain("r.user_id = p_user_id");
+  });
+
+  it("returns null if no matching run exists", () => {
+    expect(migration).toContain("return null");
+  });
+
+  it("includes member preview in the returned snapshot", () => {
+    expect(migration).toContain("campaign_audience_run_members");
+    expect(migration).toContain("jsonb_agg");
+  });
+
+  it("is service_role only", () => {
+    expect(migration).toContain("revoke all on function public.audience_get_consumed_run");
+    expect(migration).toContain("to service_role");
+  });
+});
+
+// ── Edge function: set-based + recovery ───────────────────────────────
+
+describe("resolveAudience: set-based safety check", () => {
+  const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+
+  it("calls audience_check_email_safety RPC instead of serial batches", () => {
+    expect(edgeFn).toContain("audience_check_email_safety");
+    // No more .in("email", batch) serial loop
+    expect(edgeFn).not.toContain('.in("email", batch)');
+    // No more check_active_enrollments_normalized serial loop
+    const resolveBlock = edgeFn.slice(
+      edgeFn.indexOf("allMatchedEmails"),
+      edgeFn.indexOf("Propagate ALL email"),
+    );
+    expect(resolveBlock).not.toContain("check_active_enrollments_normalized");
+  });
+
+  it("builds suppressionMap + activeEnrollmentEmails from one RPC result", () => {
+    expect(edgeFn).toContain("safetyRows");
+    expect(edgeFn).toContain("suppressionMap.set(norm, row.suppression_reasons)");
+    expect(edgeFn).toContain("activeEnrollmentEmails.add(norm)");
+  });
+
+  it("fails closed on RPC error", () => {
+    expect(edgeFn).toContain("Safety check failed");
+  });
+});
+
+describe("resolveAudience: response-loss recovery", () => {
+  const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+
+  it("calls audience_get_consumed_run when interpretation already consumed", () => {
+    expect(edgeFn).toContain("audience_get_consumed_run");
+    expect(edgeFn).toContain("p_interpretation_id: interpretationId");
+    expect(edgeFn).toContain("p_user_id: userId");
+  });
+
+  it("returns existing run from recovery RPC instead of 409", () => {
+    // The recovered flag is set by the SQL RPC, not inline TS
+    expect(edgeFn).toContain("existingRun");
+    expect(edgeFn).toContain("audience_get_consumed_run");
+  });
+
+  it("falls through to 409 if no owned run found", () => {
+    // If recovery returns null, the original 409 is still thrown
+    expect(edgeFn).toContain("Interpretation already consumed");
+  });
+
+  it("uses owner-checked retrieval (userId passed to RPC)", () => {
+    expect(edgeFn).toContain("p_user_id: userId");
+  });
+});
+
+// ── total_scanned/scan_truncated persistence ──────────────────────────
+
+describe("total_scanned and scan_truncated persistence", () => {
+  const migration = read("supabase/migrations/20260822060000_audience_safety_check_rpc.sql");
+  const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+
+  it("new migration adds total_scanned column to campaign_audience_runs", () => {
+    expect(migration).toContain("add column if not exists total_scanned int");
+  });
+
+  it("new migration adds scan_truncated column to campaign_audience_runs", () => {
+    expect(migration).toContain("add column if not exists scan_truncated boolean");
+  });
+
+  it("CREATE OR REPLACE inserts total_scanned and scan_truncated", () => {
+    expect(migration).toContain("total_scanned, scan_truncated");
+    expect(migration).toContain("(p_run->>'total_scanned')::int");
+    expect(migration).toContain("(p_run->>'scan_truncated')::boolean");
+  });
+
+  it("edge function includes total_scanned and scan_truncated in runPayload", () => {
+    expect(edgeFn).toContain("total_scanned: counts.total_scanned");
+    expect(edgeFn).toContain("scan_truncated: counts.scan_truncated");
+  });
+});
+
+// ── Recovered response shape matches UI contract ──────────────────────
+
+describe("recovery RPC returns exact UI-expected shape", () => {
+  const migration = read("supabase/migrations/20260822060000_audience_safety_check_rpc.sql");
+
+  it("returns counts object with all 8 fields including total_scanned/scan_truncated", () => {
+    expect(migration).toContain("'total_scanned', v_run.total_scanned");
+    expect(migration).toContain("'scan_truncated', v_run.scan_truncated");
+    expect(migration).toContain("'total_matched', v_run.total_matched");
+    expect(migration).toContain("'total_eligible', v_run.total_eligible");
+    expect(migration).toContain("'total_excluded', v_run.total_excluded");
+    expect(migration).toContain("'total_ambiguous', v_run.total_ambiguous");
+    expect(migration).toContain("'total_duplicate', v_run.total_duplicate");
+    expect(migration).toContain("'total_active_enrollment', v_run.total_active_enrollment");
+  });
+
+  it("returns four separate disposition arrays (eligible/excluded/ambiguous/active_enrollments)", () => {
+    expect(migration).toContain("'eligible', v_eligible");
+    expect(migration).toContain("'excluded', v_excluded");
+    expect(migration).toContain("'ambiguous', v_ambiguous");
+    expect(migration).toContain("'active_enrollments', v_active_enrollments");
+  });
+
+  it("returns interpretation_id and spec_hash at top level", () => {
+    expect(migration).toContain("'interpretation_id', p_interpretation_id");
+    expect(migration).toContain("'spec_hash', v_run.spec_hash");
+  });
+
+  it("returns success and recovered flags", () => {
+    expect(migration).toContain("'success', true");
+    expect(migration).toContain("'recovered', true");
+  });
+
+  it("filters members by disposition for each array", () => {
+    expect(migration).toContain("m.disposition = 'eligible'");
+    expect(migration).toContain("m.disposition = 'excluded'");
+    expect(migration).toContain("m.disposition = 'ambiguous'");
+    expect(migration).toContain("m.disposition = 'active_enrollment'");
+  });
+
+  it("orders members deterministically by email", () => {
+    expect(migration).toContain("order by m.email_normalized");
+  });
+});
+
+// ── Concurrent race recovery ──────────────────────────────────────────
+
+describe("concurrent consumed-interpretation recovery", () => {
+  const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+
+  it("attempts recovery on RPC error when interpretationId is set", () => {
+    // After create_audience_run_with_members fails, recovery is attempted
+    const rpcBlock = edgeFn.slice(
+      edgeFn.indexOf("if (rpcErr)"),
+      edgeFn.indexOf("// 8. Response"),
+    );
+    expect(rpcBlock).toContain("audience_get_consumed_run");
+    expect(rpcBlock).toContain("interpretationId");
+  });
+
+  it("returns recovered result directly from RPC on successful recovery", () => {
+    const rpcBlock = edgeFn.slice(
+      edgeFn.indexOf("if (rpcErr)"),
+      edgeFn.indexOf("// 8. Response"),
+    );
+    expect(rpcBlock).toContain("if (recovered) return recovered");
+  });
+
+  it("does not leak raw RPC error message", () => {
+    const rpcBlock = edgeFn.slice(
+      edgeFn.indexOf("if (rpcErr)"),
+      edgeFn.indexOf("// 8. Response"),
+    );
+    expect(rpcBlock).not.toContain("rpcErr.message");
+    expect(rpcBlock).toContain("Failed to persist audience resolution");
+  });
+});
+
+// ── No rewrite of old deployed migration ──────────────────────────────
+
+describe("migration safety: no rewrite of deployed provenance migration", () => {
+  it("new migration is a separate file from the deployed one", () => {
+    const newMigration = read("supabase/migrations/20260822060000_audience_safety_check_rpc.sql");
+    const oldMigration = read("supabase/migrations/20260822020000_campaign_audience_provenance.sql");
+    // Old migration still has its original create_audience_run_with_members
+    expect(oldMigration).toContain("create or replace function public.create_audience_run_with_members");
+    // New migration also has CREATE OR REPLACE (overrides at apply time)
+    expect(newMigration).toContain("create or replace function public.create_audience_run_with_members");
+  });
+
+  it("new migration uses ALTER TABLE ADD COLUMN IF NOT EXISTS (safe for rerun)", () => {
+    const migration = read("supabase/migrations/20260822060000_audience_safety_check_rpc.sql");
+    expect(migration).toContain("add column if not exists total_scanned");
+    expect(migration).toContain("add column if not exists scan_truncated");
+  });
+});

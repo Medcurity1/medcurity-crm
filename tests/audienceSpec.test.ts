@@ -473,13 +473,14 @@ describe("Blocker 4: Case-insensitive enrollment matching", () => {
     expect(migration).toContain('where status = \'active\'');
   });
 
-  it("resolveAudience uses the normalized RPC (not raw .in())", () => {
+  it("resolveAudience uses set-based safety RPC (not serial .in())", () => {
     const resolveFn = edgeFn.slice(
       edgeFn.indexOf("async function resolveAudience"),
       edgeFn.indexOf("// ── HTTP handler"),
     );
-    expect(resolveFn).toContain("check_active_enrollments_normalized");
-    // Must NOT use the old .from("campaign_enrollments").in("email", ...) pattern
+    expect(resolveFn).toContain("audience_check_email_safety");
+    // Must NOT use raw .in("email", ...) serial pattern
+    expect(resolveFn).not.toContain('.in("email"');
     expect(resolveFn).not.toContain('.from("campaign_enrollments")');
   });
 });
