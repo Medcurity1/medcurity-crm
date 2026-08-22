@@ -428,7 +428,7 @@ describe("AI audience rep-safe generate-audience-draft (blocker 3)", () => {
     expect(fnBlock).not.toContain('.from("campaigns")');
     expect(fnBlock).not.toContain('.from("campaign_enrollments")');
     expect(fnBlock).not.toContain("playbook-smartlead");
-    expect(fnBlock).toContain("No DB writes, no Smartlead, no enrollment");
+    expect(fnBlock).toContain("No DB reads, no DB writes, no Smartlead, no enrollment");
   });
 
   it("generateAudienceDraft validates via shared validateAudienceDraft", () => {
@@ -690,16 +690,18 @@ describe("correction 4: generate-audience-draft hardening", () => {
     expect(spec).toContain("body has");
   });
 
-  it("comments accurately say training-note reads are permitted but no DB writes", () => {
+  it("rep-callable generate-audience-draft does NOT read admin training notes", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
     const fnBlock = edgeFn.slice(
       edgeFn.indexOf("async function generateAudienceDraft"),
       edgeFn.indexOf("// ── HTTP handler"),
     );
-    expect(fnBlock).toContain("Training-note reads are permitted");
-    expect(fnBlock).toContain("No other DB writes");
-    expect(fnBlock).toContain("No DB writes, no Smartlead, no enrollment");
-    expect(fnBlock).toContain("read-only DB call");
+    // Must not call allTrainingNotes or formatTrainingNotes
+    expect(fnBlock).not.toContain("allTrainingNotes");
+    expect(fnBlock).not.toContain("formatTrainingNotes");
+    // Comments confirm no DB reads
+    expect(fnBlock).toContain("No DB reads, no DB writes, no Smartlead, no enrollment");
+    expect(fnBlock).toContain("Admin training notes are NOT included");
   });
 });
 
@@ -891,10 +893,13 @@ describe("audit 3 fix 8: MemberList responsive layout", () => {
   });
 });
 
-describe("audit 3 fix 9: no pg_cron in migration", () => {
-  it("migration does not contain cron.schedule", () => {
+describe("retention scheduling (Staging-only, idempotent)", () => {
+  it("schedules retention jobs via pg_cron with unschedule-first idempotency", () => {
     const migration = read("supabase/migrations/20260822020000_campaign_audience_provenance.sql");
-    expect(migration).not.toContain("cron.schedule");
+    expect(migration).toContain("cron.schedule");
+    expect(migration).toContain("cron.unschedule");
+    expect(migration).toContain("audience-provenance-redact-daily");
+    expect(migration).toContain("audience-interpretations-cleanup-daily");
   });
 });
 

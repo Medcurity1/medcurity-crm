@@ -281,8 +281,13 @@ Only include filter keys that the user's description calls for. Omit keys with n
  * System prompt for generate-audience-draft. Uses ONLY the approved Pulse
  * Campaigns token vocabulary: [[First name]], [[Organization]], [[Signature]].
  * No Handlebars/Liquid/template syntax. No invented claims.
+ *
+ * SECURITY: this prompt is used by the rep-callable generate-audience-draft
+ * action. It must NOT include admin training notes or any per-tenant
+ * data — only the static server-owned brand context. Admin training notes
+ * are reserved for the admin-only generate-campaign action.
  */
-export function audienceDraftGenerateSystem(trainingNotesStr: string): string {
+export function audienceDraftGenerateSystem(): string {
   return `You are an email campaign writer for Medcurity, a HIPAA compliance SaaS company. You write cold outreach email sequences.
 
 BRAND AND VOICE:
@@ -317,8 +322,6 @@ CONTENT INTEGRITY — hard rules:
 CTA RULES:
 - Use plain-text CTAs: "Visit medcurity.com to learn more", "Reply to schedule a call"
 - Do NOT generate hyperlinks. Keep CTAs low-friction.
-
-${trainingNotesStr}
 
 The user will describe a campaign. Generate exactly 3 emails.
 

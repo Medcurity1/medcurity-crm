@@ -146,11 +146,11 @@ describe("validateAudienceDraft: Markdown rejection", () => {
     } }));
     expect(e.some((s) => s.includes("Markdown heading"))).toBe(true);
   });
-  it("rejects Markdown code block", () => {
+  it("rejects Markdown code (inline backtick or fenced)", () => {
     const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
       body_html: '<p>Hi [[First name]],</p><p>```code```</p><p>[[Signature]]</p>',
     } }));
-    expect(e.some((s) => s.includes("Markdown code block"))).toBe(true);
+    expect(e.some((s) => s.includes("Markdown inline/fenced code"))).toBe(true);
   });
 });
 
@@ -329,5 +329,182 @@ describe("validateAudienceDraft: returns all errors, not just first", () => {
       body_html: '<p>Hello,</p><p>We serve 1,000+ organizations. Act now!</p>',
     } }));
     expect(e.length).toBeGreaterThan(2);
+  });
+});
+
+// ── Release-blocker hardening tests ───────────────────────────────────
+
+describe("validateAudienceDraft: null/primitive sequence entries", () => {
+  it("handles null entry without TypeError", () => {
+    const p = validPayload();
+    (p.sequence as unknown[])[1] = null;
+    const e = validateAudienceDraft(p);
+    expect(e.some((s) => s.includes("null or not an object"))).toBe(true);
+  });
+  it("handles number entry without TypeError", () => {
+    const p = validPayload();
+    (p.sequence as unknown[])[0] = 42;
+    const e = validateAudienceDraft(p);
+    expect(e.some((s) => s.includes("null or not an object"))).toBe(true);
+  });
+  it("handles string entry without TypeError", () => {
+    const p = validPayload();
+    (p.sequence as unknown[])[2] = "bad";
+    const e = validateAudienceDraft(p);
+    expect(e.some((s) => s.includes("null or not an object"))).toBe(true);
+  });
+});
+
+describe("validateAudienceDraft: subject control characters", () => {
+  it("rejects CR in subject", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: { subject: "Hello\rworld" } }));
+    expect(e.some((s) => s.includes("control characters"))).toBe(true);
+  });
+  it("rejects LF in subject", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: { subject: "Hello\nworld" } }));
+    expect(e.some((s) => s.includes("control characters"))).toBe(true);
+  });
+  it("rejects tab in subject", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: { subject: "Hello\tworld" } }));
+    expect(e.some((s) => s.includes("control characters"))).toBe(true);
+  });
+});
+
+describe("validateAudienceDraft: campaign_name/target_audience safety", () => {
+  it("rejects control characters in campaign_name", () => {
+    const e = validateAudienceDraft(mutate({ topFields: { campaign_name: "Bad\x00name" } }));
+    expect(e.some((s) => s.includes("unsafe characters"))).toBe(true);
+  });
+  it("rejects HTML in target_audience", () => {
+    const e = validateAudienceDraft(mutate({ topFields: { target_audience: "<script>x</script>" } }));
+    expect(e.some((s) => s.includes("unsafe characters"))).toBe(true);
+  });
+});
+
+describe("validateAudienceDraft: HTML structural balance", () => {
+  it("rejects unclosed <p>", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],<p>Text</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("unclosed <p>") || s.includes("unmatched"))).toBe(true);
+  });
+  it("rejects unmatched </strong>", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>Text</strong></p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("unmatched </strong>"))).toBe(true);
+  });
+});
+
+describe("validateAudienceDraft: URL rejection", () => {
+  it("rejects https:// URLs in body", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>Visit https://example.com</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("external URL"))).toBe(true);
+  });
+  it("allows plain 'medcurity.com' without scheme", () => {
+    expect(validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>Visit medcurity.com to learn more.</p><p>[[Signature]]</p>',
+    } }))).toEqual([]);
+  });
+});
+
+describe("validateAudienceDraft: expanded claim coverage", () => {
+  it("rejects spelled-out social proof (thousands of organizations)", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>Trusted by thousands of healthcare organizations.</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("spelled-out social-proof"))).toBe(true);
+  });
+  it("rejects award claims (award-winning)", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>Our award-winning platform.</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("award/ranking"))).toBe(true);
+  });
+  it("rejects '#1' ranking claim", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>The #1 HIPAA compliance tool.</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("award/ranking"))).toBe(true);
+  });
+  it("rejects any percentage in content", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>Save up to 50% on compliance costs.</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("percentage claim"))).toBe(true);
+  });
+  it("rejects capability claims (eliminates breaches)", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>Our tool eliminates all breaches.</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("capability/outcome"))).toBe(true);
+  });
+  it("rejects risk-free claim", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>Try it risk-free today.</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("guarantee/certification"))).toBe(true);
+  });
+});
+
+describe("validateAudienceDraft: Markdown expanded", () => {
+  it("rejects numbered list", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>\n1. First\n2. Second</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("Markdown numbered list"))).toBe(true);
+  });
+  it("rejects blockquote", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>\n> Quote here</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("Markdown blockquote"))).toBe(true);
+  });
+  it("rejects inline backtick code", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>Use the `command` here.</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("Markdown inline/fenced code"))).toBe(true);
+  });
+  it("rejects Markdown bold **...**", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>This is **important**.</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("Markdown bold"))).toBe(true);
+  });
+});
+
+describe("SECURITY: generate-audience-draft does not read admin training notes", () => {
+  it("prompt function takes no trainingNotesStr parameter", () => {
+    const prompts = require("fs").readFileSync(
+      require("path").resolve(__dirname, "..", "supabase/functions/_shared/playbook-prompts.ts"), "utf8",
+    );
+    // audienceDraftGenerateSystem() has no parameter
+    expect(prompts).toMatch(/export function audienceDraftGenerateSystem\(\):\s*string/);
+  });
+  it("edge function does not call allTrainingNotes in generate-audience-draft", () => {
+    const edgeFn = require("fs").readFileSync(
+      require("path").resolve(__dirname, "..", "supabase/functions/playbook-ai/index.ts"), "utf8",
+    );
+    const fnBlock = edgeFn.slice(
+      edgeFn.indexOf("async function generateAudienceDraft"),
+      edgeFn.indexOf("// ── HTTP handler"),
+    );
+    expect(fnBlock).not.toContain("allTrainingNotes");
+    expect(fnBlock).not.toContain("formatTrainingNotes");
+  });
+});
+
+describe("UX: generation error/retry in CampaignWizard", () => {
+  it("shows error state with retry and edit-audience options", () => {
+    const wizard = require("fs").readFileSync(
+      require("path").resolve(__dirname, "..", "src/features/playbook/CampaignWizard.tsx"), "utf8",
+    );
+    expect(wizard).toContain("genAudienceDraft.isError");
+    expect(wizard).toContain("Retry generation");
+    expect(wizard).toContain("Edit audience");
+    expect(wizard).toContain("audience is still resolved");
   });
 });

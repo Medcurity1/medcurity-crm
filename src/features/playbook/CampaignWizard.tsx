@@ -1182,6 +1182,28 @@ export function CampaignWizard({
                 </div>
               )}
 
+              {/* AI sequence generation error with retry — preserves resolved audience */}
+              {flow === "ask-ai" && !campaign && !genAudienceDraft.isPending && genAudienceDraft.isError && aiAudienceResult && (
+                <div className="camp-card p-5 space-y-3">
+                  <AlertTriangle className="h-6 w-6 text-amber-500 mx-auto" />
+                  <p className="text-sm font-medium text-center">Could not generate the email sequence.</p>
+                  <p className="text-xs text-muted-foreground text-center break-words">
+                    {(genAudienceDraft.error as Error)?.message ?? "An unexpected error occurred."}
+                  </p>
+                  <p className="text-xs text-muted-foreground text-center">
+                    Your {aiAudienceResult.counts.total_eligible}-person audience is still resolved. You can retry or go back to edit your audience.
+                  </p>
+                  <div className="flex justify-center gap-2 pt-1">
+                    <Button variant="ghost" onClick={() => { setAiAudienceResult(null); setRecipients([]); setFlow("ask-ai"); }}>
+                      <ArrowLeft className="h-4 w-4 mr-1" /> Edit audience
+                    </Button>
+                    <button type="button" className="camp-btn-primary" onClick={() => handleAiAudienceComplete(aiAudienceResult)}>
+                      Retry generation
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {flow === "ai" && !campaign && (
                 <div className="camp-card p-4 space-y-2">
                   <div className="space-y-1.5">

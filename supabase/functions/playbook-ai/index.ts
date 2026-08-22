@@ -1253,12 +1253,13 @@ async function generateAudienceDraft(description: string): Promise<Record<string
     throw new AudienceActionError(piiRejectionMessage(piiFound), 422);
   }
 
-  // Training-note reads are permitted (read-only context for generation).
-  // No other DB writes occur in this function.
-  const notes = await allTrainingNotes();
+  // SECURITY: rep-callable action uses only the static server-owned brand
+  // context. Admin training notes are NOT included — they are reserved
+  // for the admin-only generate-campaign action to prevent hidden-data
+  // exfiltration from rep-accessible AI calls. No DB reads or writes.
   const text = await callClaude({
     model: PLAYBOOK_IDEAS_MODEL,
-    system: audienceDraftGenerateSystem(formatTrainingNotes(notes)),
+    system: audienceDraftGenerateSystem(),
     user: trimmed,
     maxTokens: 4000,
     temperature: 0.7,
@@ -1274,8 +1275,7 @@ async function generateAudienceDraft(description: string): Promise<Record<string
     );
   }
 
-  // No DB writes, no Smartlead, no enrollment — pure generation only.
-  // (allTrainingNotes above is a read-only DB call for generation context.)
+  // No DB reads, no DB writes, no Smartlead, no enrollment — pure generation only.
   return { success: true, campaign: parsed };
 }
 

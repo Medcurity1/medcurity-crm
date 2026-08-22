@@ -880,20 +880,45 @@ create trigger trg_campaign_drafts_expire_runs
   before delete on public.campaign_drafts
   for each row execute function public.campaign_drafts_before_delete_expire_runs();
 
--- ── 13. Retention scheduling (NOT done by this migration) ────────────────
+-- ── 13. Retention scheduling (Staging-only, idempotent) ──────────────────
 --
--- The redaction/cleanup RPCs (audience_run_redact_expired,
--- audience_interpretation_cleanup) are service-role-only and ready to call.
--- This migration intentionally does NOT schedule them via pg_cron to
--- avoid silently altering Production scheduler state when this migration
--- is eventually promoted.
---
--- STAGING DEPLOYMENT REQUIREMENT: after applying this migration, manually
--- schedule via pg_cron or an external cron (GitHub Actions, Supabase
--- dashboard, etc.):
---   SELECT public.audience_run_redact_expired();   -- daily, e.g. 03:00 UTC
---   SELECT public.audience_interpretation_cleanup(); -- daily, e.g. 04:00 UTC
---
+-- This entire AI audience migration is Staging-only today. Eventual
+-- Production application requires Nathan's explicit approval (see D20).
+-- Scheduling here is safe because:
+--   1. pg_cron jobs only run on the project where they are created.
+--   2. The RPCs are service-role-only, non-destructive (90-day window,
+--      expired-unconsumed-only deletion), and idempotent.
+--   3. Unschedule before schedule ensures no duplicate jobs.
+
+do $do_retention$
+begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    -- Unschedule any existing jobs with these names (idempotent)
+    begin
+      perform cron.unschedule('audience-provenance-redact-daily');
+    exception when others then null;
+    end;
+    begin
+      perform cron.unschedule('audience-interpretations-cleanup-daily');
+    exception when others then null;
+    end;
+
+    -- Schedule fresh
+    perform cron.schedule(
+      'audience-provenance-redact-daily',
+      '0 3 * * *',
+      $cmd$select public.audience_run_redact_expired()$cmd$
+    );
+    perform cron.schedule(
+      'audience-interpretations-cleanup-daily',
+      '0 4 * * *',
+      $cmd$select public.audience_interpretation_cleanup()$cmd$
+    );
+    raise notice 'pg_cron: audience retention jobs scheduled (daily 03:00/04:00 UTC)';
+  else
+    raise notice 'pg_cron not available; retention RPCs must be scheduled externally';
+  end if;
+end $do_retention$;
 
 commit;
 

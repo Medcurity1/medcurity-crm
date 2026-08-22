@@ -540,15 +540,17 @@ describe("Retention RPCs and scheduling policy", () => {
     expect(migration).toContain("to service_role");
   });
 
-  it("does NOT auto-schedule via pg_cron (prevents silently altering Production scheduler)", () => {
-    expect(migration).not.toContain("cron.schedule");
-    expect(migration).not.toContain("do $do_cron$");
+  it("schedules retention idempotently via pg_cron (Staging-only migration)", () => {
+    expect(migration).toContain("cron.schedule");
+    expect(migration).toContain("audience-provenance-redact-daily");
+    expect(migration).toContain("audience-interpretations-cleanup-daily");
+    // Unschedule before schedule for idempotency
+    expect(migration).toContain("cron.unschedule");
   });
 
-  it("records explicit Staging deployment requirement for external scheduling", () => {
-    expect(migration).toContain("STAGING DEPLOYMENT REQUIREMENT");
-    expect(migration).toContain("audience_run_redact_expired");
-    expect(migration).toContain("audience_interpretation_cleanup");
+  it("documents Staging-only scope and Production requires approval", () => {
+    expect(migration).toContain("Staging-only");
+    expect(migration).toContain("Nathan");
   });
 });
 
