@@ -1761,12 +1761,14 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
   if (p.recipients.length > 10_000) {
     throw new Error("A campaign can include at most 10,000 recipients. Split this audience into smaller launches.");
   }
-  // Rep rollout flip point: remove/adjust this admin gate when reps get UI
-  // access to Campaigns (see App.tsx's AdminGate + ContactsList.tsx's own
-  // admin check — those are the gates that actually decide who can reach
-  // this today; this is just the backend half staying in sync with them).
-  if (!callerCtx.isAdmin && (!callerCtx.userId || p.owner_id !== callerCtx.userId)) {
-    throw new Error("You can only launch campaigns for yourself.");
+  // A non-admin launch always belongs to its authenticated caller. Do not
+  // trust owner_id from the browser: forcing it here prevents both accidental
+  // late failures from a stale owner picker and deliberate cross-user writes.
+  // Admins retain the existing ability to launch on another active user's
+  // behalf.
+  if (!callerCtx.isAdmin) {
+    if (!callerCtx.userId) throw new Error("Sign in again before launching a campaign.");
+    p.owner_id = callerCtx.userId;
   }
   const delay = () => new Promise((r) => setTimeout(r, 300));
 
@@ -3737,12 +3739,20 @@ Deno.serve(async (req) => {
     // ContactsList.tsx are the only ways a browser gets here), so this
     // branch is backend-ready but practically unreachable by a real rep
     // until that UI flip happens. When it does, a non-admin authenticated
-    // caller may reach ONLY these three actions, and only to act on a
-    // campaign/enrollment they own — see the ownership checks inside
-    // launch()/setCampaignStatus()/setEnrollmentStatus(). Every other
-    // action (import/sync/daily-sweep/delete-campaign/webhook diagnostics/
-    // decide-suggestion/inbox-health/etc.) stays admin-or-service-role-only.
-    const REP_ELIGIBLE_ACTIONS = new Set(["launch", "set-campaign-status", "set-enrollment-status"]);
+    // caller may reach the three bounded builder reads below plus launch and
+    // own-campaign/enrollment controls — see the ownership checks inside
+    // launch()/setCampaignStatus()/setEnrollmentStatus(). Every mutation or
+    // operational action outside that allowlist (import/sync/daily-sweep,
+    // delete, diagnostics, inbox settings, suggestions, etc.) stays admin or
+    // service-role only.
+    const REP_ELIGIBLE_ACTIONS = new Set([
+      "status",
+      "email-accounts",
+      "inbox-health",
+      "launch",
+      "set-campaign-status",
+      "set-enrollment-status",
+    ]);
     let repUserId: string | null = null;
     if (!svcCaller && !adminCaller) {
       if (!REP_ELIGIBLE_ACTIONS.has(action)) {
@@ -3836,8 +3846,16 @@ Deno.serve(async (req) => {
     if (!smartleadConfigured()) return json({ error: "SMARTLEAD_API_KEY not configured" }, 500);
 
     if (action === "email-accounts") {
-      const accounts = await fetchEmailAccounts();
-      return json({ accounts: accounts as unknown[] });
+      // Never forward Smartlead's raw email-account objects to the browser:
+      // they can contain SMTP/IMAP credentials and unrelated configuration.
+      // The builder needs identity only; capacity/signature/warmup live in
+      // the separately projected inbox-health response.
+      const accounts = extractEmailAccountRows(await fetchEmailAccounts()).map((account) => ({
+        id: Number(account.id),
+        from_email: typeof account.from_email === "string" ? account.from_email : null,
+        from_name: typeof account.from_name === "string" ? account.from_name : null,
+      })).filter((account) => Number.isInteger(account.id) && account.id > 0);
+      return json({ accounts });
     }
     if (action === "import") return json(await importCampaigns());
     if (action === "sync") return json(await syncCampaigns(Date.now() + 35_000));
