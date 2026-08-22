@@ -1263,14 +1263,23 @@ async function generateAudienceDraft(description: string): Promise<Record<string
   // context. Admin training notes are NOT included — they are reserved
   // for the admin-only generate-campaign action to prevent hidden-data
   // exfiltration from rep-accessible AI calls. No DB reads or writes.
-  const text = await callClaude({
-    model: PLAYBOOK_IDEAS_MODEL,
-    system: audienceDraftGenerateSystem(),
-    user: trimmed,
-    maxTokens: 4000,
-    temperature: 0.7,
-  });
-  const parsed = parseJsonResponse(text);
+  //
+  // Provider/network/parse errors are mapped to a fixed retryable
+  // AudienceActionError. Raw provider bodies, API responses, model
+  // output, endpoints, and internal details are never exposed.
+  let parsed: Record<string, unknown>;
+  try {
+    const text = await callClaude({
+      model: PLAYBOOK_IDEAS_MODEL,
+      system: audienceDraftGenerateSystem(),
+      user: trimmed,
+      maxTokens: 4000,
+      temperature: 0.7,
+    });
+    parsed = parseJsonResponse(text);
+  } catch {
+    throw new AudienceActionError("Could not generate the sequence. Please retry.", 503, true);
+  }
 
   // ── Root null/primitive/array guard ────────────────────────────
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {

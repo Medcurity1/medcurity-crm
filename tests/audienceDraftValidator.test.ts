@@ -1111,3 +1111,37 @@ describe("generateAudienceDraft errors never reflect model-provided values", () 
     expect(fn).toMatch(/throw new AudienceActionError\(`Email \$\{n\}: invalid subject selection`/);
   });
 });
+
+describe("provider/parse errors mapped to fixed retryable message", () => {
+  const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+  const fn = edgeFn.slice(
+    edgeFn.indexOf("async function generateAudienceDraft"),
+    edgeFn.indexOf("// ── HTTP handler"),
+  );
+
+  it("wraps callClaude + parseJsonResponse in try/catch", () => {
+    expect(fn).toMatch(/try\s*\{[\s\S]*?callClaude[\s\S]*?parseJsonResponse[\s\S]*?\}\s*catch/);
+  });
+
+  it("catch produces a fixed retryable AudienceActionError", () => {
+    expect(fn).toContain("Could not generate the sequence. Please retry.");
+    expect(fn).toContain("503, true");
+  });
+
+  it("catch does not reference the caught error object", () => {
+    // The catch block should be bare `catch {` not `catch (e) { ...e.message... }`
+    // to ensure no raw provider text leaks
+    const catchBlock = fn.slice(fn.indexOf("} catch"), fn.indexOf("Could not generate") + 60);
+    expect(catchBlock).not.toContain("e.message");
+    expect(catchBlock).not.toContain("err.message");
+    expect(catchBlock).not.toContain("error.message");
+  });
+
+  it("intentional 422 validation errors after parsing are preserved (not caught)", () => {
+    // The try/catch ends before the validation section
+    const afterCatch = fn.slice(fn.indexOf("Could not generate"));
+    expect(afterCatch).toContain("Invalid theme selection");
+    expect(afterCatch).toContain("invalid subject selection");
+    expect(afterCatch).toContain("invalid message selection");
+  });
+});
