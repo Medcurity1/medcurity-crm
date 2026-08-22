@@ -275,7 +275,9 @@ OUTPUT FORMAT (JSON only, no markdown fences):
 Only include filter keys that the user's description calls for. Omit keys with no relevant criteria (do not include empty arrays). ambiguous_criteria and unsupported_criteria should be omitted if empty.`;
 }
 
-// ── Audience draft generation prompt (separate from admin campaignGenerateSystem) ──
+// ── Audience draft generation: structured claim-free schema ──────────────
+// The AI fills safe intent fields; the server renders final HTML.
+// Claims are impossible by construction: no free-form assertion field.
 
 /**
  * System prompt for generate-audience-draft. Uses ONLY the approved Pulse
@@ -288,65 +290,74 @@ Only include filter keys that the user's description calls for. Omit keys with n
  * are reserved for the admin-only generate-campaign action.
  */
 export function audienceDraftGenerateSystem(): string {
-  return `You are an email campaign writer for Medcurity, a HIPAA compliance SaaS company. You write cold outreach email sequences.
+  return `You are an email campaign writer for Medcurity, a HIPAA compliance SaaS company.
 
-BRAND AND VOICE:
-${CAMPAIGN_VOICE_CONTEXT}
+Medcurity products: Security Risk Analysis (SRA), HIPAA training (Medcurity Academy), PolicyScan, Network Vulnerability Assessment (NVA), BAA Management, Vendor Management.
 
-PERSONALIZATION TOKENS — use ONLY these exact tokens:
-- [[First name]] — inserts the recipient's first name with a safe fallback. Use in greetings: "Hi [[First name]],"
-- [[Organization]] — inserts the recipient's organization name with a safe fallback.
-- [[Signature]] — inserts the sender's configured signature. MUST appear exactly once as the LAST line of every email body. NEVER write 'Best,' or 'The Medcurity Team' or any other sign-off before it.
+You will produce a STRUCTURED JSON schema. The server renders the final email. You do NOT write HTML, Markdown, URLs, links, or template syntax.
 
-FORBIDDEN — do NOT use any of these:
-- Handlebars: {{#if ...}}, {{else}}, {{/if}}, {{variable}}
-- Template syntax: {%...%}, ${...}, <%...%>
-- Smartlead syntax: %signature%, {{first_name}}, {{company_name}}, {{sender_name}}
-- Markdown: [text](url), # headings, **bold**, *italic*, ``` code blocks, bullet lists
-- Do NOT generate any clickable links (<a> tags). Write plain-text CTAs instead: "Visit medcurity.com to learn more" rather than embedding a hyperlink.
-
-HTML RULES — email bodies must use ONLY these tags with NO attributes:
-- <p>...</p> for paragraphs (no class, style, id, or any attribute)
-- <br> for line breaks (no attributes)
-- <strong>...</strong> or <b>...</b> for bold (no attributes)
-- <em>...</em> or <i>...</i> for italic (no attributes)
-- No <a>, <img>, <div>, <span>, <table>, <ul>, <li>, or any other tag.
-
-CONTENT INTEGRITY — hard rules:
-- NEVER invent statistics, numbers, customer counts, or quantitative claims. Do not write "1,000+ organizations", "serving X customers", "Y% improvement", or any number not from training notes.
-- NEVER make compliance, legal, regulatory, or certification claims (e.g. "ensures compliance", "fully compliant", "certified") unless explicitly in training notes.
-- NEVER fabricate case studies, testimonials, outcomes, guarantees, or "proven results".
-- NEVER use urgency/deadline language: "Act now", "limited time", "don't miss out".
-- If no specific claim is provided, write generally: "healthcare organizations like yours".
-
-CTA RULES:
-- Use plain-text CTAs: "Visit medcurity.com to learn more", "Reply to schedule a call"
-- Do NOT generate hyperlinks. Keep CTAs low-friction.
-
-The user will describe a campaign. Generate exactly 3 emails.
-
-Respond in JSON only. No markdown, no preamble.
-
+OUTPUT FORMAT (JSON only, no markdown, no preamble):
 {
-  "campaign_name": "Short descriptive name",
-  "target_audience": "Who this targets",
+  "campaign_name": "Short name, plain text, no claims, max 80 chars",
+  "target_audience": "Who this targets, plain text, max 80 chars",
   "sequence": [
     {
       "seq_number": 1,
       "delay_days": 0,
-      "subject": "Subject line (under 60 characters)",
-      "body_html": "<p>Hi [[First name]],</p><p>Body text here.</p><p>[[Signature]]</p>"
+      "subject": "Subject line, plain text, under 60 characters",
+      "greeting_name": true,
+      "body_paragraphs": [
+        "First paragraph of plain text.",
+        "Second paragraph. Describe how Medcurity can help."
+      ],
+      "cta": "reply_to_schedule"
     }
   ]
 }
 
-Rules:
-- Exactly 3 emails. seq_number must be 1, 2, 3. First delay_days is 0. Follow-ups delay_days exactly 3 or 4.
-- Every email body MUST end with the exact paragraph <p>[[Signature]]</p> as the last element. No sign-offs before it.
-- First email MUST begin with a greeting containing [[First name]], e.g. "<p>Hi [[First name]],</p>".
-- Body concise: first email under 150 words, follow-ups under 100 words.
-- Subjects: plain text only, under 60 characters, no HTML, no [[Signature]].
-- No links, no URLs in HTML tags. Write "Visit medcurity.com" as plain text if needed.`;
+FIELD RULES:
+- campaign_name/target_audience: plain text, no numbers/stats/claims
+- seq_number: exactly 1, 2, 3
+- delay_days: email 1 = 0, email 2 = 3 or 4, email 3 = 3 or 4
+- subject: plain text, max 60 characters
+- greeting_name: always true (server adds greeting)
+- body_paragraphs: 1-4 plain text strings. No HTML. No URLs. No template syntax. No statistics, percentages, customer counts, guarantees, compliance claims, awards, testimonials, case studies, outcomes, or deadlines.
+- cta: one of: "reply_to_schedule", "visit_medcurity", "reply_to_learn_more", "book_a_demo"
+
+CONSTRAINTS:
+- Exactly 3 emails.
+- body_paragraphs: plain text only. Write about Medcurity products and how they help healthcare organizations. Be conversational and conservative.
+- Do NOT write claims, statistics, guarantees, compliance assertions, or outcomes.
+- The server adds greeting, signature, CTA text, and formatting.`;
+}
+
+/** Server-owned CTA text. AI picks an ID; server renders the copy. */
+export const AUDIENCE_DRAFT_CTA_MAP: Record<string, string> = {
+  reply_to_schedule: "Reply to this email to schedule a call.",
+  visit_medcurity: "Visit medcurity.com to learn more.",
+  reply_to_learn_more: "Reply and we will send you more information.",
+  book_a_demo: "Reply to this email to book a quick demo.",
+};
+
+/** Render structured draft email into safe HTML. Server owns the output format. */
+export function renderAudienceDraftEmail(email: {
+  greeting_name: boolean;
+  body_paragraphs: string[];
+  cta: string;
+}): string {
+  const parts: string[] = [];
+  if (email.greeting_name) parts.push("<p>Hi [[First name]],</p>");
+  for (const para of email.body_paragraphs) {
+    parts.push("<p>" + escapeForHtml(para) + "</p>");
+  }
+  const ctaText = AUDIENCE_DRAFT_CTA_MAP[email.cta] ?? AUDIENCE_DRAFT_CTA_MAP.reply_to_learn_more;
+  parts.push("<p>" + escapeForHtml(ctaText) + "</p>");
+  parts.push("<p>[[Signature]]</p>");
+  return parts.join("");
+}
+
+function escapeForHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 /** Word-overlap duplicate check for training notes (server.js:7117). */

@@ -463,10 +463,23 @@ function wordCount(html: string): number {
   return html.replace(/<[^>]+>/g, " ").replace(/&\w+;/g, " ").replace(/\[\[[^\]]*\]\]/g, "X").trim().split(/\s+/).filter(Boolean).length;
 }
 
-/** Validate safe plain text (no HTML, no controls except space/newline). */
-function isSafePlainText(s: string): boolean {
+/**
+ * Validate safe single-line plain text: no HTML, no controls (including
+ * CR/LF/tab), no URLs, no Markdown, no template tokens, no claims.
+ */
+function validateSafePlainText(s: string, field: string, maxLen: number, errors: string[]): void {
   // eslint-disable-next-line no-control-regex
-  return !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(s) && !/<[^>]+>/.test(s);
+  if (/[\x00-\x1f\x7f]/.test(s)) errors.push(`${field} contains control characters`);
+  if (/<[^>]+>/.test(s)) errors.push(`${field} contains HTML`);
+  if (/https?:\/\/|www\.|:\/\/|mailto:|ftp:/i.test(s)) errors.push(`${field} contains URL/protocol`);
+  if (/\[\[|\]\]|\{\{|\}\}|\{%|%\}|%signature%|\$\{|<%/i.test(s)) errors.push(`${field} contains template syntax`);
+  if (/\[.+\]\(.+\)|[*_`#]/.test(s)) errors.push(`${field} contains Markdown syntax`);
+  if (s.length > maxLen) errors.push(`${field} exceeds ${maxLen} characters`);
+  if (/\n|\r/.test(s)) errors.push(`${field} must be single-line`);
+  // Claims
+  if (/\d[\d,]*\+?\s*(?:healthcare\s+)?(?:organizations?|customers?|clients?|providers?|hospitals?)\b/i.test(s)) errors.push(`${field} contains unsupported claim`);
+  if (/\d+\s*%/i.test(s)) errors.push(`${field} contains percentage claim`);
+  if (/\b(?:guarantee|certified|proven|award|#1|best.in.class|number.one|ensures?\s+compliance|fully?\s+compliant)\b/i.test(s)) errors.push(`${field} contains unsupported claim`);
 }
 
 /** Check HTML is structurally balanced for the safe tag set. */
@@ -492,28 +505,28 @@ function checkHtmlBalance(body: string): string | null {
 }
 
 /**
- * Validate a complete audience-draft payload. Returns all errors found
- * (empty array = valid). Pure function with no side effects.
- *
- * Fail-closed: null/primitive sequence entries produce controlled errors,
- * never unhandled TypeError. Returns a bounded list of actionable errors
- * (max ~3 per email to keep 422 responses readable).
+ * Validate a complete audience-draft payload (rendered form with body_html).
+ * Returns all errors found (empty array = valid). Pure, deterministic,
+ * no side effects. Fail-closed: root null/primitive and null sequence
+ * entries produce controlled errors, never unhandled TypeError.
+ * Returns a bounded actionable list (continues validating after
+ * structural errors where safe).
  */
 export function validateAudienceDraft(raw: AudienceDraftPayload): string[] {
+  // Root null/primitive guard
+  if (!raw || typeof raw !== "object") return ["payload is null or not an object"];
   const errors: string[] = [];
 
-  // ── Top-level fields (safe plain text) ────────────────────────────
+  // ── Top-level: single-line safe plain text ────────────────────────
   if (typeof raw.campaign_name !== "string" || !String(raw.campaign_name).trim()) {
     errors.push("Empty campaign_name");
   } else {
-    if (String(raw.campaign_name).length > 200) errors.push("campaign_name exceeds 200 characters");
-    if (!isSafePlainText(String(raw.campaign_name))) errors.push("campaign_name contains unsafe characters");
+    validateSafePlainText(String(raw.campaign_name), "campaign_name", 200, errors);
   }
   if (typeof raw.target_audience !== "string" || !String(raw.target_audience).trim()) {
     errors.push("Empty target_audience");
   } else {
-    if (String(raw.target_audience).length > 200) errors.push("target_audience exceeds 200 characters");
-    if (!isSafePlainText(String(raw.target_audience))) errors.push("target_audience contains unsafe characters");
+    validateSafePlainText(String(raw.target_audience), "target_audience", 200, errors);
   }
 
   // ── Sequence structure ────────────────────────────────────────────
@@ -525,91 +538,92 @@ export function validateAudienceDraft(raw: AudienceDraftPayload): string[] {
     const n = i + 1;
     const pfx = `Email ${n}: `;
 
-    // Null/primitive guard — controlled 422, never TypeError
+    // Null/primitive guard
     if (!entry || typeof entry !== "object") { errors.push(pfx + "entry is null or not an object"); continue; }
     const email = entry as Record<string, unknown>;
 
-    // ── Structural fields ─────────────────────────────────────────
-    if (email.seq_number !== n) { errors.push(pfx + `seq_number must be ${n}`); continue; }
-    if (typeof email.delay_days !== "number" || !Number.isInteger(email.delay_days)) { errors.push(pfx + "delay_days must be an integer"); continue; }
-    if (n === 1 && email.delay_days !== 0) errors.push(pfx + "first email delay_days must be 0");
-    if (n > 1 && (email.delay_days < 3 || email.delay_days > 4)) errors.push(pfx + `follow-up delay_days must be 3-4, got ${email.delay_days}`);
+    // ── Structural fields (continue validating other fields after error) ──
+    if (email.seq_number !== n) errors.push(pfx + `seq_number must be ${n}`);
+    if (typeof email.delay_days !== "number" || !Number.isInteger(email.delay_days)) {
+      errors.push(pfx + "delay_days must be an integer");
+    } else {
+      if (n === 1 && email.delay_days !== 0) errors.push(pfx + "first email delay_days must be 0");
+      if (n > 1 && (email.delay_days < 3 || email.delay_days > 4)) errors.push(pfx + `follow-up delay_days must be 3-4, got ${email.delay_days}`);
+    }
 
-    if (typeof email.subject !== "string" || !(email.subject as string).trim()) { errors.push(pfx + "missing subject"); continue; }
-    if (typeof email.body_html !== "string" || !(email.body_html as string).trim()) { errors.push(pfx + "missing body"); continue; }
+    if (typeof email.subject !== "string" || !(email.subject as string).trim()) { errors.push(pfx + "missing subject"); }
+    if (typeof email.body_html !== "string" || !(email.body_html as string).trim()) { errors.push(pfx + "missing body"); }
+
+    // If subject or body missing, cannot validate content
+    if (typeof email.subject !== "string" || typeof email.body_html !== "string") continue;
 
     const subj = email.subject as string;
     const body = email.body_html as string;
     const combined = body + subj;
 
-    // ── Subject: plain text, <=60 chars, no controls/CR/LF/tab ───
-    if (subj.length > 60) errors.push(pfx + `subject exceeds 60 characters (${subj.length})`);
-    if (/<[^>]+>/.test(subj)) errors.push(pfx + "subject contains HTML markup");
-    // eslint-disable-next-line no-control-regex
-    if (/[\x00-\x1f\x7f]/.test(subj)) errors.push(pfx + "subject contains control characters (CR/LF/tab/etc.)");
+    // ── Subject: single-line safe plain text <=60 chars ──────────
+    validateSafePlainText(subj, pfx + "subject", 60, errors);
     if (/\[\[Signature\]\]/i.test(subj)) errors.push(pfx + "subject must not contain [[Signature]]");
 
-    // ── Template/alternate syntax rejection (body + subject) ─────
-    if (/\{\{/.test(combined)) errors.push(pfx + "contains forbidden {{...}} template syntax");
-    if (/\{%/.test(combined)) errors.push(pfx + "contains forbidden {%...%} template syntax");
-    if (/%signature%/i.test(combined)) errors.push(pfx + "contains Smartlead %signature%; use [[Signature]]");
-    if (/\$\{/.test(combined)) errors.push(pfx + "contains forbidden ${...} interpolation");
-    if (/<%.+%>/s.test(combined)) errors.push(pfx + "contains forbidden <% %> template syntax");
-    // Malformed/mixed token delimiters
-    if (/\[\[(?!\s*(?:First name|Organization|Signature)\s*\]\])/.test(combined)) {
-      // Check more precisely: any [[ that isn't one of the three allowed
-      const bracketTokens = combined.match(/\[\[[^\]]*\]\]/g) ?? [];
-      for (const tok of bracketTokens) {
-        if (!DRAFT_ALLOWED_TOKENS.has(tok)) errors.push(pfx + `unknown token ${tok}`);
-      }
-      // Unclosed [[ (no matching ]])
-      const unclosed = combined.match(/\[\[(?![^\]]*\]\])/g);
-      if (unclosed) errors.push(pfx + "contains unclosed [[ delimiter");
+    // ── Template/alternate syntax rejection ──────────────────────
+    if (/\{\{/.test(combined)) errors.push(pfx + "contains {{...}} template syntax");
+    if (/\{%/.test(combined)) errors.push(pfx + "contains {%...%} template syntax");
+    if (/%signature%/i.test(combined)) errors.push(pfx + "contains %signature%");
+    if (/\$\{/.test(combined)) errors.push(pfx + "contains ${...} interpolation");
+    if (/<%.+%>/s.test(combined)) errors.push(pfx + "contains <% %> template syntax");
+    // Unknown/malformed [[ tokens
+    const bracketTokens = combined.match(/\[\[[^\]]*\]\]/g) ?? [];
+    for (const tok of bracketTokens) {
+      if (!DRAFT_ALLOWED_TOKENS.has(tok)) errors.push(pfx + `unknown token ${tok}`);
     }
+    // Unclosed/stray delimiters (opening [[ without ]] or lone ]])
+    if (/\[\[(?![^\]]*\]\])/.test(combined)) errors.push(pfx + "unclosed [[ delimiter");
+    if (/(?<!\[\[.*)\]\]/.test(combined) && !bracketTokens.length) errors.push(pfx + "stray ]] delimiter");
 
-    // ── All Markdown rejection ───────────────────────────────────
-    if (/\[[^\]]+\]\([^)]+\)/.test(body)) errors.push(pfx + "contains Markdown link [text](url)");
-    if (/(?:^|\n|>)\s*#{1,6}\s/m.test(body)) errors.push(pfx + "contains Markdown heading");
-    if (/(?:^|\n)\s*[-*+]\s/m.test(body)) errors.push(pfx + "contains Markdown bullet list");
-    if (/(?:^|\n)\s*\d+[.)]\s/m.test(body)) errors.push(pfx + "contains Markdown numbered list");
-    if (/(?:^|\n)\s*>/.test(body)) errors.push(pfx + "contains Markdown blockquote");
-    if (/`/.test(body)) errors.push(pfx + "contains Markdown inline/fenced code");
-    if (/\*\*[^*]+\*\*/.test(body)) errors.push(pfx + "contains Markdown bold **...**");
-    if (/(?<!\*)\*(?!\*)(?:[^*]+)\*(?!\*)/.test(body) && !/<em>/.test(body)) errors.push(pfx + "contains Markdown italic *...*");
+    // ── External reference rejection ─────────────────────────────
+    // Reject all protocols, www, domain/path patterns, mailto, ftp
+    // Allow exact bare "medcurity.com" only
+    if (/https?:\/\//i.test(body)) errors.push(pfx + "contains http(s):// URL");
+    if (/\/\//i.test(body) && !/<\//.test(body.replace(/<\/[a-z]+>/gi, ""))) errors.push(pfx + "contains protocol-relative //");
+    if (/\bwww\./i.test(body)) errors.push(pfx + "contains www. URL");
+    if (/\bmailto:/i.test(body)) errors.push(pfx + "contains mailto: URL");
+    if (/\bftp:/i.test(body)) errors.push(pfx + "contains ftp: URL");
+    // Domain/path (word.word/path) but exclude medcurity.com
+    const bodyWithoutMedcurity = body.replace(/\bmedcurity\.com\b/g, "ALLOWED_DOMAIN");
+    if (/\b[a-z0-9-]+\.[a-z]{2,}\/\S/i.test(bodyWithoutMedcurity)) errors.push(pfx + "contains domain/path URL");
 
-    // ── Body HTML structure ───────────────────────────────────────
+    // ── Markdown in HTML rejection (within paragraph text) ───────
+    if (/\[[^\]]+\]\([^)]+\)/.test(body)) errors.push(pfx + "Markdown link");
+    if (/#{1,6}\s/.test(body.replace(/<[^>]+>/g, ""))) errors.push(pfx + "Markdown heading");
+    if (/(?:^|>)\s*[-*+]\s/m.test(body.replace(/<[^>]+>/g, "\n"))) errors.push(pfx + "Markdown bullet");
+    if (/(?:^|>)\s*\d+[.)]\s/m.test(body.replace(/<[^>]+>/g, "\n"))) errors.push(pfx + "Markdown numbered list");
+    if (/(?:^|>)\s*>/m.test(body.replace(/<[^>]+>/g, "\n"))) errors.push(pfx + "Markdown blockquote");
+    if (/`/.test(body)) errors.push(pfx + "Markdown code");
+    if (/\*\*[^*]+\*\*/.test(body.replace(/<[^>]+>/g, ""))) errors.push(pfx + "Markdown bold");
+    if (/__[^_]+__/.test(body.replace(/<[^>]+>/g, ""))) errors.push(pfx + "Markdown underscore emphasis");
+
+    // ── Strict canonical HTML grammar ────────────────────────────
     const BODY_SAFE_TAGS = new Set(["p", "br", "strong", "b", "em", "i"]);
     const tagMatches = [...body.matchAll(/<\/?([a-z][a-z0-9]*)\b([^>]*)>/gi)];
     for (const m of tagMatches) {
       const tag = m[1].toLowerCase();
       const attrs = (m[2] ?? "").trim();
-      if (tag === "a") {
-        errors.push(pfx + "v1 does not allow generated <a> links; use plain-text CTAs");
-        break;
-      }
-      if (!BODY_SAFE_TAGS.has(tag)) {
-        errors.push(pfx + `unsupported HTML tag <${tag}>`);
-        continue;
-      }
-      if (attrs && !/^\/?$/.test(attrs)) {
-        errors.push(pfx + `<${tag}> must not have attributes`);
-      }
+      if (tag === "a") { errors.push(pfx + "v1 does not allow <a> links"); break; }
+      if (!BODY_SAFE_TAGS.has(tag)) { errors.push(pfx + `unsupported tag <${tag}>`); continue; }
+      if (attrs && !/^\/?$/.test(attrs)) errors.push(pfx + `<${tag}> must not have attributes`);
     }
-
-    // Structural balance check (unclosed/mismatched tags)
+    // Nested <p> (invalid HTML)
+    if (/<p[^>]*>(?:(?!<\/p>).)*<p/is.test(body)) errors.push(pfx + "nested <p> tags");
+    // Stray closing tags without opener, or spaced variants like < /p>
+    if (/<\s+\/?\w/i.test(body)) errors.push(pfx + "malformed spaced tag delimiter");
+    // Structural balance
     const balanceErr = checkHtmlBalance(body);
     if (balanceErr) errors.push(pfx + `malformed HTML: ${balanceErr}`);
-
-    // Dangerous patterns
-    if (/<script[\s>]/i.test(body)) errors.push(pfx + "contains <script>");
-    if (/<style[\s>]/i.test(body)) errors.push(pfx + "contains <style>");
-    if (/<iframe[\s>]/i.test(body)) errors.push(pfx + "contains <iframe>");
-    if (/\bon\w+\s*=/i.test(body)) errors.push(pfx + "contains event-handler attribute");
-    if (/javascript\s*:/i.test(body)) errors.push(pfx + "contains javascript: URL");
-    if (/data\s*:/i.test(body)) errors.push(pfx + "contains data: URL");
-
-    // Plain external URLs (reject except bare medcurity.com mention)
-    if (/https?:\/\//i.test(body)) errors.push(pfx + "contains external URL; use plain-text CTA like 'Visit medcurity.com'");
+    // Dangerous HTML
+    if (/<script|<style|<iframe|<object|<embed|<form/i.test(body)) errors.push(pfx + "dangerous HTML tag");
+    if (/\bon\w+\s*=/i.test(body)) errors.push(pfx + "event-handler attribute");
+    if (/javascript\s*:/i.test(body)) errors.push(pfx + "javascript: URL");
+    if (/data\s*:/i.test(body)) errors.push(pfx + "data: URL");
 
     // Visible text required
     const visibleText = body.replace(/<[^>]+>/g, "").replace(/&\w+;/g, " ").replace(/\[\[[^\]]*\]\]/g, "").trim();
@@ -633,38 +647,26 @@ export function validateAudienceDraft(raw: AudienceDraftPayload): string[] {
     const maxWords = n === 1 ? 150 : 100;
     if (wc > maxWords) errors.push(pfx + `body has ${wc} words; limit is ${maxWords}`);
 
-    // ── Categorical unsupported-claim gate ────────────────────────
-    // Because no structured claim-ID provenance exists, safest v1 is
-    // to prohibit all factual marketing/compliance claims rather than
-    // pretending to verify free-text notes.
-
-    // Quantitative social-proof (number + entity, any word order)
+    // ── Categorical claim gate ───────────────────────────────────
+    // No structured approved-claim source exists. Safest v1: block all.
     if (/\d[\d,]*\+?\s*(?:healthcare\s+)?(?:organizations?|customers?|clients?|practices?|hospitals?|providers?|facilities|companies)\b/i.test(combined)) {
-      errors.push(pfx + "contains quantitative social-proof claim");
+      errors.push(pfx + "quantitative social-proof claim");
     }
-    // Spelled-out number social proof
     if (/\b(?:hundreds?|thousands?|millions?)\s+(?:of\s+)?(?:healthcare\s+)?(?:organizations?|customers?|clients?|hospitals?|providers?)\b/i.test(combined)) {
-      errors.push(pfx + "contains spelled-out social-proof claim");
+      errors.push(pfx + "spelled-out social-proof claim");
     }
-    // Percentage claims (any word order with %)
-    if (/\d+\s*%/.test(combined)) {
-      errors.push(pfx + "contains percentage claim");
-    }
-    // Awards/recognition
+    if (/\d+\s*%/.test(combined)) errors.push(pfx + "percentage claim");
     if (/(?:\b(?:award[- ]?winning|industry[- ]?leading|best[- ]?in[- ]?class|number[- ]?one|top[- ]?rated)\b|(?:^|\s)#1\b)/i.test(combined)) {
-      errors.push(pfx + "contains unsupported award/ranking claim");
+      errors.push(pfx + "award/ranking claim");
     }
-    // Guarantee/certification/testimonial/outcome/legal/compliance
     if (/\b(?:guarantee[ds]?|certif(?:ied|ication)|testimonial|case\s+stud(?:y|ies)|proven\s+(?:results?|track\s+record|solution)|legally?\s+compliant|ensures?\s+compliance|full(?:y)?\s+compliant|100%|risk[- ]?free|money[- ]?back)\b/i.test(combined)) {
-      errors.push(pfx + "contains unsupported guarantee/certification/compliance claim");
+      errors.push(pfx + "guarantee/certification/compliance claim");
     }
-    // Capability claims (we can/will/do achieve/prevent/eliminate)
     if (/\b(?:eliminates?|prevents?|stops?)\s+(?:all\s+)?(?:breaches?|violations?|fines?|penalties|risks?)\b/i.test(combined)) {
-      errors.push(pfx + "contains unsupported capability/outcome claim");
+      errors.push(pfx + "capability/outcome claim");
     }
-    // Deadline/urgency
     if (/\b(?:act\s+now|don[''\u2019]t\s+miss|limited\s+time|deadline|expires?\s+soon|last\s+chance|urgent|hurry|while\s+supplies?\s+last)\b/i.test(combined)) {
-      errors.push(pfx + "contains urgency/deadline language");
+      errors.push(pfx + "urgency/deadline language");
     }
   }
 

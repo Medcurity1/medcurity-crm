@@ -28,6 +28,8 @@ import {
   ideasUserPrompt,
   campaignGenerateSystem,
   audienceDraftGenerateSystem,
+  AUDIENCE_DRAFT_CTA_MAP,
+  renderAudienceDraftEmail,
   campaignSuggestSystem,
   campaignRegenerateSystem,
   campaignAnalysisSystem,
@@ -1266,17 +1268,73 @@ async function generateAudienceDraft(description: string): Promise<Record<string
   });
   const parsed = parseJsonResponse(text);
 
-  // ── Strict output validation via shared pure validator ──────────
-  const validationErrors = validateAudienceDraft(parsed as AudienceDraftPayload);
+  // ── Validate structured intent fields ──────────────────────────
+  if (typeof parsed.campaign_name !== "string" || !parsed.campaign_name.trim()) {
+    throw new AudienceActionError("AI returned empty campaign_name", 422);
+  }
+  if (typeof parsed.target_audience !== "string" || !parsed.target_audience.trim()) {
+    throw new AudienceActionError("AI returned empty target_audience", 422);
+  }
+  if (!Array.isArray(parsed.sequence) || parsed.sequence.length !== 3) {
+    throw new AudienceActionError("AI must produce exactly 3 emails", 422);
+  }
+
+  // ── Server-render each email from safe intent fields ───────────
+  const renderedSequence = [];
+  for (let i = 0; i < 3; i++) {
+    const raw = parsed.sequence[i] as Record<string, unknown>;
+    if (!raw || typeof raw !== "object") {
+      throw new AudienceActionError(`Email ${i + 1}: entry is null or not an object`, 422);
+    }
+    const n = i + 1;
+    if (raw.seq_number !== n) throw new AudienceActionError(`Email ${n}: seq_number must be ${n}`, 422);
+    if (typeof raw.delay_days !== "number" || !Number.isInteger(raw.delay_days)) throw new AudienceActionError(`Email ${n}: delay_days must be an integer`, 422);
+    if (typeof raw.subject !== "string" || !raw.subject.trim()) throw new AudienceActionError(`Email ${n}: missing subject`, 422);
+    if (!Array.isArray(raw.body_paragraphs) || raw.body_paragraphs.length === 0) throw new AudienceActionError(`Email ${n}: body_paragraphs must be a nonempty array`, 422);
+    if (raw.body_paragraphs.length > 4) throw new AudienceActionError(`Email ${n}: body_paragraphs cannot exceed 4 entries`, 422);
+    for (let j = 0; j < raw.body_paragraphs.length; j++) {
+      if (typeof raw.body_paragraphs[j] !== "string" || !raw.body_paragraphs[j].trim()) {
+        throw new AudienceActionError(`Email ${n}: body_paragraphs[${j}] must be a nonempty string`, 422);
+      }
+    }
+    const cta = typeof raw.cta === "string" ? raw.cta : "reply_to_learn_more";
+    if (!AUDIENCE_DRAFT_CTA_MAP[cta]) {
+      throw new AudienceActionError(`Email ${n}: unknown cta "${cta}"`, 422);
+    }
+
+    // Server renders the final HTML from safe intent fields
+    const bodyHtml = renderAudienceDraftEmail({
+      greeting_name: true,
+      body_paragraphs: raw.body_paragraphs as string[],
+      cta,
+    });
+
+    renderedSequence.push({
+      seq_number: n,
+      delay_days: raw.delay_days,
+      subject: raw.subject,
+      body_html: bodyHtml,
+    });
+  }
+
+  // Build the output payload in the standard GeneratedCampaign shape
+  const campaign = {
+    campaign_name: String(parsed.campaign_name).slice(0, 200),
+    target_audience: String(parsed.target_audience).slice(0, 200),
+    sequence: renderedSequence,
+  };
+
+  // ── Validate the rendered output via shared pure validator ──────
+  const validationErrors = validateAudienceDraft(campaign as AudienceDraftPayload);
   if (validationErrors.length > 0) {
     throw new AudienceActionError(
-      `AI output failed content validation: ${validationErrors[0]}`,
+      `AI output failed content validation: ${validationErrors.slice(0, 5).join("; ")}`,
       422,
     );
   }
 
   // No DB reads, no DB writes, no Smartlead, no enrollment — pure generation only.
-  return { success: true, campaign: parsed };
+  return { success: true, campaign };
 }
 
 // ── HTTP handler ─────────────────────────────────────────────────────────

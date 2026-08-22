@@ -660,7 +660,7 @@ describe("correction 4: generate-audience-draft hardening", () => {
     const spec = read("supabase/functions/_shared/audience-spec.ts");
     expect(spec).toContain("Empty campaign_name");
     expect(spec).toContain("Empty target_audience");
-    expect(spec).toContain("campaign_name exceeds");
+    expect(spec).toContain("exceeds");
   });
 
   it("validates seq_number must be exactly 1,2,3", () => {
@@ -686,7 +686,7 @@ describe("correction 4: generate-audience-draft hardening", () => {
 
   it("validates subject and body length bounds", () => {
     const spec = read("supabase/functions/_shared/audience-spec.ts");
-    expect(spec).toContain("subject exceeds 60 characters");
+    expect(spec).toContain("exceeds");
     expect(spec).toContain("body has");
   });
 
@@ -996,7 +996,7 @@ describe("audit 4 fix 5: reject overlong output, require visible text", () => {
   it("rejects overlong campaign_name instead of truncating", () => {
     // Validation now in shared validateAudienceDraft
     const spec = read("supabase/functions/_shared/audience-spec.ts");
-    expect(spec).toContain("campaign_name exceeds");
+    expect(spec).toContain("exceeds");
     // Must NOT truncate (no slice assignment for campaign_name)
     expect(spec).not.toMatch(/raw\.campaign_name\s*=.*\.slice/);
   });
@@ -1695,31 +1695,33 @@ describe("audience draft content contract (prompt + validation)", () => {
     expect(genBlock).not.toContain("campaignGenerateSystem");
   });
 
-  it("prompt specifies only [[First name]], [[Organization]], [[Signature]] tokens", () => {
+  it("prompt specifies structured JSON schema with greeting_name, body_paragraphs, cta", () => {
     expect(prompts).toContain("audienceDraftGenerateSystem");
     const promptFn = prompts.slice(
       prompts.indexOf("function audienceDraftGenerateSystem"),
       prompts.indexOf("/** Word-overlap"),
     );
+    expect(promptFn).toContain("STRUCTURED JSON schema");
+    expect(promptFn).toContain("greeting_name");
+    expect(promptFn).toContain("body_paragraphs");
+    expect(promptFn).toContain("cta");
+    // Server renders tokens; prompt does not instruct model to write them
     expect(promptFn).toContain("[[First name]]");
-    expect(promptFn).toContain("[[Organization]]");
     expect(promptFn).toContain("[[Signature]]");
     // Must NOT instruct use of Handlebars/Liquid as the intended syntax
-    // (the prompt mentions them in the FORBIDDEN section, which is correct)
-    expect(promptFn).toContain("FORBIDDEN");
     expect(promptFn).not.toMatch(/Use.*Smartlead.*liquid syntax.*\{\{#if/i);
   });
 
-  it("prompt forbids Handlebars and Markdown links", () => {
+  it("prompt forbids HTML, Markdown, URLs, links, and template syntax", () => {
     const promptFn = prompts.slice(
       prompts.indexOf("function audienceDraftGenerateSystem"),
       prompts.indexOf("/** Word-overlap"),
     );
-    expect(promptFn).toContain("Handlebars");
-    // Prompt lists Markdown with specific items (not "Markdown links like [text](url)")
-    expect(promptFn).toContain("Markdown:");
-    expect(promptFn).toContain("[text](url)");
-    expect(promptFn).toContain("FORBIDDEN");
+    // Prompt now uses structured JSON and bans free-form syntax holistically
+    expect(promptFn).toContain("No HTML");
+    expect(promptFn).toContain("No URLs");
+    expect(promptFn).toContain("No template syntax");
+    expect(promptFn).toContain("Markdown");
   });
 
   it("prompt has strong no-invented-claims rule", () => {
@@ -1727,11 +1729,10 @@ describe("audience draft content contract (prompt + validation)", () => {
       prompts.indexOf("function audienceDraftGenerateSystem"),
       prompts.indexOf("/** Word-overlap"),
     );
-    expect(promptFn).toContain("NEVER invent statistics");
-    expect(promptFn).toContain("NEVER make compliance");
-    expect(promptFn).toContain("NEVER fabricate");
-    // Prompt uses "1,000+ organizations" as an example (not "1,000+ healthcare organizations")
-    expect(promptFn).toContain("1,000+ organizations");
+    // Structured JSON prompt forbids claims via field rules and constraints
+    expect(promptFn).toContain("No statistics");
+    expect(promptFn).toContain("guarantees");
+    expect(promptFn).toContain("Do NOT write claims");
   });
 
   // ── Validation rejects exact bad patterns (now in shared validator) ──
@@ -1749,19 +1750,18 @@ describe("audience draft content contract (prompt + validation)", () => {
 
   it("shared validator rejects Handlebars {{...}} template syntax", () => {
     const spec = read("supabase/functions/_shared/audience-spec.ts");
-    expect(spec).toContain("forbidden {{...}} template syntax");
+    expect(spec).toContain("contains {{...}} template syntax");
     expect(spec).toContain("{{");
   });
 
   it("shared validator rejects {%...%} template syntax", () => {
     const spec = read("supabase/functions/_shared/audience-spec.ts");
-    expect(spec).toContain("forbidden {%...%} template syntax");
+    expect(spec).toContain("contains {%...%} template syntax");
   });
 
   it("shared validator rejects %signature% Smartlead syntax", () => {
     const spec = read("supabase/functions/_shared/audience-spec.ts");
-    expect(spec).toContain("Smartlead %signature%");
-    expect(spec).toContain("use [[Signature]]");
+    expect(spec).toContain("contains %signature%");
   });
 
   it("shared validator rejects unknown [[...]] tokens", () => {
@@ -1772,7 +1772,7 @@ describe("audience draft content contract (prompt + validation)", () => {
 
   it("shared validator rejects Markdown [text](url) links in body", () => {
     const spec = read("supabase/functions/_shared/audience-spec.ts");
-    expect(spec).toContain("Markdown link [text](url)");
+    expect(spec).toContain("Markdown link");
   });
 
   it("shared validator rejects invented quantitative social-proof claims", () => {
@@ -1792,7 +1792,7 @@ describe("audience draft content contract (prompt + validation)", () => {
   it("shared validator validates HTML against email-safe allowlist", () => {
     const spec = read("supabase/functions/_shared/audience-spec.ts");
     expect(spec).toContain("BODY_SAFE_TAGS");
-    expect(spec).toContain("unsupported HTML tag");
+    expect(spec).toContain("unsupported tag");
   });
 
   it("shared validator rejects script/style/iframe/event-handler/javascript URL", () => {

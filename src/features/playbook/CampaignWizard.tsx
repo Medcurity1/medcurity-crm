@@ -352,6 +352,8 @@ export function CampaignWizard({
   const [settingsOpen, setSettingsOpen] = useState(false);
   // AI Audience state — tracks the resolved audience result from AiAudienceFlow
   const [aiAudienceResult, setAiAudienceResult] = useState<AiAudienceResult | null>(null);
+  // Nonce forces AiAudienceFlow to remount (reset to brief entry) on Edit audience
+  const [aiFlowNonce, setAiFlowNonce] = useState(0);
   // AI audience draft saved success state (local save, not Smartlead launch).
   // aiDraftSavedSnapshot tracks the exact serialized state at save time so
   // subsequent edits re-dirty the guard (aiDraftSaved resets to false).
@@ -1166,6 +1168,7 @@ export function CampaignWizard({
               {/* Ask AI audience flow — sub-steps inside Build */}
               {flow === "ask-ai" && !campaign && (
                 <AiAudienceFlow
+                  key={aiFlowNonce}
                   onComplete={handleAiAudienceComplete}
                   onBack={() => { setFlow("choose"); setAiAudienceResult(null); }}
                 />
@@ -1194,7 +1197,7 @@ export function CampaignWizard({
                     Your {aiAudienceResult.counts.total_eligible}-person audience is still resolved. You can retry or go back to edit your audience.
                   </p>
                   <div className="flex justify-center gap-2 pt-1">
-                    <Button variant="ghost" onClick={() => { setAiAudienceResult(null); setRecipients([]); setFlow("ask-ai"); }}>
+                    <Button variant="ghost" onClick={() => { setAiAudienceResult(null); setRecipients([]); setFlow("ask-ai"); setAiFlowNonce((n) => n + 1); }}>
                       <ArrowLeft className="h-4 w-4 mr-1" /> Edit audience
                     </Button>
                     <button type="button" className="camp-btn-primary" onClick={() => handleAiAudienceComplete(aiAudienceResult)}>

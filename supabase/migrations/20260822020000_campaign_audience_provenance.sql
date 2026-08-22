@@ -890,34 +890,47 @@ create trigger trg_campaign_drafts_expire_runs
 --      expired-unconsumed-only deletion), and idempotent.
 --   3. Unschedule before schedule ensures no duplicate jobs.
 
+-- Fail-closed: require pg_cron. This migration is Staging-only today;
+-- Production promotion requires Nathan's explicit approval per D20.
 do $do_retention$
+declare
+  v_job_name text;
 begin
-  if exists (select 1 from pg_extension where extname = 'pg_cron') then
-    -- Unschedule any existing jobs with these names (idempotent)
-    begin
-      perform cron.unschedule('audience-provenance-redact-daily');
-    exception when others then null;
-    end;
-    begin
-      perform cron.unschedule('audience-interpretations-cleanup-daily');
-    exception when others then null;
-    end;
-
-    -- Schedule fresh
-    perform cron.schedule(
-      'audience-provenance-redact-daily',
-      '0 3 * * *',
-      $cmd$select public.audience_run_redact_expired()$cmd$
-    );
-    perform cron.schedule(
-      'audience-interpretations-cleanup-daily',
-      '0 4 * * *',
-      $cmd$select public.audience_interpretation_cleanup()$cmd$
-    );
-    raise notice 'pg_cron: audience retention jobs scheduled (daily 03:00/04:00 UTC)';
-  else
-    raise notice 'pg_cron not available; retention RPCs must be scheduled externally';
+  -- pg_cron is required; fail if not installed
+  if not exists (select 1 from pg_extension where extname = 'pg_cron') then
+    raise exception 'pg_cron extension is required for audience retention scheduling';
   end if;
+
+  -- Idempotent unschedule: only unschedule jobs that actually exist
+  -- (no exception-when-others swallowing)
+  for v_job_name in
+    select jobname from cron.job
+    where jobname in ('audience-provenance-redact-daily', 'audience-interpretations-cleanup-daily')
+  loop
+    perform cron.unschedule(v_job_name);
+  end loop;
+
+  -- Schedule both exact jobs
+  perform cron.schedule(
+    'audience-provenance-redact-daily',
+    '0 3 * * *',
+    $cmd$select public.audience_run_redact_expired()$cmd$
+  );
+  perform cron.schedule(
+    'audience-interpretations-cleanup-daily',
+    '0 4 * * *',
+    $cmd$select public.audience_interpretation_cleanup()$cmd$
+  );
+
+  -- Assert both jobs now exist (fail-closed verification)
+  if not exists (select 1 from cron.job where jobname = 'audience-provenance-redact-daily') then
+    raise exception 'Failed to schedule audience-provenance-redact-daily';
+  end if;
+  if not exists (select 1 from cron.job where jobname = 'audience-interpretations-cleanup-daily') then
+    raise exception 'Failed to schedule audience-interpretations-cleanup-daily';
+  end if;
+
+  raise notice 'pg_cron: audience retention jobs scheduled (daily 03:00/04:00 UTC)';
 end $do_retention$;
 
 commit;

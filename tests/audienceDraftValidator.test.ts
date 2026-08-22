@@ -3,6 +3,10 @@
 
 import { describe, it, expect } from "vitest";
 import { validateAudienceDraft, type AudienceDraftPayload } from "../supabase/functions/_shared/audience-spec";
+import { renderAudienceDraftEmail, AUDIENCE_DRAFT_CTA_MAP } from "../supabase/functions/_shared/playbook-prompts";
+import { readFileSync } from "fs";
+import path from "path";
+const read = (relative: string) => readFileSync(path.resolve(__dirname, "..", relative), "utf8");
 
 /** Build a valid 3-email payload for mutation tests. */
 function validPayload(): AudienceDraftPayload {
@@ -83,7 +87,7 @@ describe("validateAudienceDraft: subject validation", () => {
   });
   it("rejects HTML in subject", () => {
     const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: { subject: "Hello <b>world</b>" } }));
-    expect(e.some((s) => s.includes("HTML markup"))).toBe(true);
+    expect(e.some((s) => s.includes("contains HTML"))).toBe(true);
   });
   it("rejects [[Signature]] in subject", () => {
     const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: { subject: "Hi [[Signature]]" } }));
@@ -117,7 +121,7 @@ describe("validateAudienceDraft: template syntax rejection", () => {
     const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
       body_html: '<p>Hi [[First name]],</p><p>Text</p><p>%signature%</p>',
     } }));
-    expect(e.some((s) => s.includes("Smartlead %signature%"))).toBe(true);
+    expect(e.some((s) => s.includes("contains %signature%"))).toBe(true);
   });
   it("rejects ${...} interpolation", () => {
     const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
@@ -150,7 +154,7 @@ describe("validateAudienceDraft: Markdown rejection", () => {
     const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
       body_html: '<p>Hi [[First name]],</p><p>```code```</p><p>[[Signature]]</p>',
     } }));
-    expect(e.some((s) => s.includes("Markdown inline/fenced code"))).toBe(true);
+    expect(e.some((s) => s.includes("Markdown code"))).toBe(true);
   });
 });
 
@@ -159,13 +163,13 @@ describe("validateAudienceDraft: HTML structure", () => {
     const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
       body_html: '<p>Hi [[First name]],</p><p><a href="https://medcurity.com">Click</a></p><p>[[Signature]]</p>',
     } }));
-    expect(e.some((s) => s.includes("v1 does not allow generated <a> links"))).toBe(true);
+    expect(e.some((s) => s.includes("v1 does not allow <a> links"))).toBe(true);
   });
   it("rejects <div> tags", () => {
     const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
       body_html: '<div>Hi [[First name]],</div><p>Text</p><p>[[Signature]]</p>',
     } }));
-    expect(e.some((s) => s.includes("unsupported HTML tag <div>"))).toBe(true);
+    expect(e.some((s) => s.includes("unsupported tag <div>"))).toBe(true);
   });
   it("rejects attributes on <p>", () => {
     const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
@@ -373,11 +377,11 @@ describe("validateAudienceDraft: subject control characters", () => {
 describe("validateAudienceDraft: campaign_name/target_audience safety", () => {
   it("rejects control characters in campaign_name", () => {
     const e = validateAudienceDraft(mutate({ topFields: { campaign_name: "Bad\x00name" } }));
-    expect(e.some((s) => s.includes("unsafe characters"))).toBe(true);
+    expect(e.some((s) => s.includes("control characters"))).toBe(true);
   });
   it("rejects HTML in target_audience", () => {
     const e = validateAudienceDraft(mutate({ topFields: { target_audience: "<script>x</script>" } }));
-    expect(e.some((s) => s.includes("unsafe characters"))).toBe(true);
+    expect(e.some((s) => s.includes("contains HTML"))).toBe(true);
   });
 });
 
@@ -401,7 +405,7 @@ describe("validateAudienceDraft: URL rejection", () => {
     const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
       body_html: '<p>Hi [[First name]],</p><p>Visit https://example.com</p><p>[[Signature]]</p>',
     } }));
-    expect(e.some((s) => s.includes("external URL"))).toBe(true);
+    expect(e.some((s) => s.includes("contains http(s):// URL"))).toBe(true);
   });
   it("allows plain 'medcurity.com' without scheme", () => {
     expect(validateAudienceDraft(mutate({ emailIdx: 0, fields: {
@@ -466,7 +470,7 @@ describe("validateAudienceDraft: Markdown expanded", () => {
     const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
       body_html: '<p>Hi [[First name]],</p><p>Use the `command` here.</p><p>[[Signature]]</p>',
     } }));
-    expect(e.some((s) => s.includes("Markdown inline/fenced code"))).toBe(true);
+    expect(e.some((s) => s.includes("Markdown code"))).toBe(true);
   });
   it("rejects Markdown bold **...**", () => {
     const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
@@ -506,5 +510,272 @@ describe("UX: generation error/retry in CampaignWizard", () => {
     expect(wizard).toContain("Retry generation");
     expect(wizard).toContain("Edit audience");
     expect(wizard).toContain("audience is still resolved");
+  });
+});
+
+// ── Structured schema: server rendering ───────────────────────────────
+
+describe("renderAudienceDraftEmail (server rendering)", () => {
+  it("produces greeting + body paragraphs + CTA + signature", () => {
+    const html = renderAudienceDraftEmail({
+      greeting_name: true,
+      body_paragraphs: ["Hello from Medcurity.", "We help with HIPAA."],
+      cta: "reply_to_schedule",
+    });
+    expect(html).toContain("<p>Hi [[First name]],</p>");
+    expect(html).toContain("<p>Hello from Medcurity.</p>");
+    expect(html).toContain("<p>We help with HIPAA.</p>");
+    expect(html).toContain("<p>Reply to this email to schedule a call.</p>");
+    expect(html).toContain("<p>[[Signature]]</p>");
+    // Signature is the exact last element
+    expect(html).toMatch(/<p>\[\[Signature\]\]<\/p>$/);
+  });
+
+  it("escapes HTML in body paragraphs", () => {
+    const html = renderAudienceDraftEmail({
+      greeting_name: true,
+      body_paragraphs: ['We help <script>alert(1)</script> orgs.'],
+      cta: "visit_medcurity",
+    });
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).not.toContain("<script>");
+  });
+
+  it("falls back to default CTA for unknown key", () => {
+    const html = renderAudienceDraftEmail({
+      greeting_name: true,
+      body_paragraphs: ["Text."],
+      cta: "nonexistent_cta",
+    });
+    expect(html).toContain(AUDIENCE_DRAFT_CTA_MAP.reply_to_learn_more);
+  });
+
+  it("server-rendered HTML passes the validator", () => {
+    const html = renderAudienceDraftEmail({
+      greeting_name: true,
+      body_paragraphs: ["We offer HIPAA compliance tools for healthcare organizations.", "Our Security Risk Analysis helps identify gaps."],
+      cta: "book_a_demo",
+    });
+    const payload: AudienceDraftPayload = {
+      campaign_name: "HIPAA Outreach",
+      target_audience: "Hospitals in MN",
+      sequence: [
+        { seq_number: 1, delay_days: 0, subject: "HIPAA compliance help", body_html: html },
+        { seq_number: 2, delay_days: 3, subject: "Quick follow-up", body_html: renderAudienceDraftEmail({ greeting_name: true, body_paragraphs: ["Just checking in."], cta: "reply_to_schedule" }) },
+        { seq_number: 3, delay_days: 4, subject: "One more thought", body_html: renderAudienceDraftEmail({ greeting_name: true, body_paragraphs: ["We would love to help."], cta: "visit_medcurity" }) },
+      ],
+    };
+    expect(validateAudienceDraft(payload)).toEqual([]);
+  });
+
+  it("claims in AI paragraph text are escaped to plain text by server", () => {
+    // Even if the AI sneaks claims into body_paragraphs, the server
+    // HTML-escapes them so they render as visible text, not as executable.
+    const html = renderAudienceDraftEmail({
+      greeting_name: true,
+      body_paragraphs: ['We serve 1,000+ organizations.'],
+      cta: "reply_to_schedule",
+    });
+    // The claim text IS rendered (as escaped plain text), but the validator
+    // catches it when validating the rendered output.
+    const payload: AudienceDraftPayload = {
+      campaign_name: "Test",
+      target_audience: "Test",
+      sequence: [
+        { seq_number: 1, delay_days: 0, subject: "Test", body_html: html },
+        { seq_number: 2, delay_days: 3, subject: "Test 2", body_html: renderAudienceDraftEmail({ greeting_name: true, body_paragraphs: ["Text."], cta: "reply_to_schedule" }) },
+        { seq_number: 3, delay_days: 4, subject: "Test 3", body_html: renderAudienceDraftEmail({ greeting_name: true, body_paragraphs: ["Text."], cta: "reply_to_schedule" }) },
+      ],
+    };
+    const errors = validateAudienceDraft(payload);
+    expect(errors.some((e) => e.includes("social-proof claim"))).toBe(true);
+  });
+});
+
+// ── Root null/primitive ───────────────────────────────────────────────
+
+describe("validateAudienceDraft: root null/primitive", () => {
+  it("handles null payload without TypeError", () => {
+    expect(validateAudienceDraft(null as unknown as AudienceDraftPayload)).toEqual(["payload is null or not an object"]);
+  });
+  it("handles undefined payload", () => {
+    expect(validateAudienceDraft(undefined as unknown as AudienceDraftPayload)).toEqual(["payload is null or not an object"]);
+  });
+  it("handles number payload", () => {
+    expect(validateAudienceDraft(42 as unknown as AudienceDraftPayload)).toEqual(["payload is null or not an object"]);
+  });
+  it("handles string payload", () => {
+    expect(validateAudienceDraft("bad" as unknown as AudienceDraftPayload)).toEqual(["payload is null or not an object"]);
+  });
+});
+
+// ── Top-level field safety ────────────────────────────────────────────
+
+describe("validateAudienceDraft: top-level single-line plain text", () => {
+  it("rejects URLs in campaign_name", () => {
+    const e = validateAudienceDraft(mutate({ topFields: { campaign_name: "Visit https://evil.com" } }));
+    expect(e.some((s) => s.includes("URL/protocol"))).toBe(true);
+  });
+  it("rejects template tokens in campaign_name", () => {
+    const e = validateAudienceDraft(mutate({ topFields: { campaign_name: "Test {{var}}" } }));
+    expect(e.some((s) => s.includes("template syntax"))).toBe(true);
+  });
+  it("rejects Markdown in target_audience", () => {
+    const e = validateAudienceDraft(mutate({ topFields: { target_audience: "## Heading" } }));
+    expect(e.some((s) => s.includes("Markdown"))).toBe(true);
+  });
+  it("rejects newlines in campaign_name", () => {
+    const e = validateAudienceDraft(mutate({ topFields: { campaign_name: "Line1\nLine2" } }));
+    expect(e.some((s) => s.includes("single-line"))).toBe(true);
+  });
+  it("rejects claims in campaign_name", () => {
+    const e = validateAudienceDraft(mutate({ topFields: { campaign_name: "Serving 500 hospitals" } }));
+    expect(e.some((s) => s.includes("unsupported claim"))).toBe(true);
+  });
+});
+
+// ── Nested <p> and malformed HTML ─────────────────────────────────────
+
+describe("validateAudienceDraft: strict HTML grammar", () => {
+  it("rejects nested <p> tags", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],<p>Nested</p></p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("nested <p>"))).toBe(true);
+  });
+  it("rejects spaced tag delimiters like < /p>", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],< /p><p>Text</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("malformed spaced tag") || s.includes("unclosed"))).toBe(true);
+  });
+});
+
+// ── External reference syntax ─────────────────────────────────────────
+
+describe("validateAudienceDraft: external reference rejection", () => {
+  it("rejects www. URLs", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>Visit www.example.com</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("www."))).toBe(true);
+  });
+  it("rejects mailto: URLs", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>Email mailto:test@example.com</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("mailto:"))).toBe(true);
+  });
+  it("rejects ftp: URLs", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 0, fields: {
+      body_html: '<p>Hi [[First name]],</p><p>Download ftp://files.example.com</p><p>[[Signature]]</p>',
+    } }));
+    expect(e.some((s) => s.includes("ftp:"))).toBe(true);
+  });
+});
+
+// ── Continue validating after seq/delay errors ────────────────────────
+
+describe("validateAudienceDraft: continues after structural errors", () => {
+  it("reports subject error even when delay_days is wrong", () => {
+    const e = validateAudienceDraft(mutate({ emailIdx: 1, fields: { delay_days: 10, subject: "x".repeat(61) } }));
+    expect(e.some((s) => s.includes("delay_days"))).toBe(true);
+    expect(e.some((s) => s.includes("exceeds 60"))).toBe(true);
+  });
+});
+
+// ── CTA allowlist ─────────────────────────────────────────────────────
+
+describe("AUDIENCE_DRAFT_CTA_MAP", () => {
+  it("has exactly 4 server-owned CTA options", () => {
+    expect(Object.keys(AUDIENCE_DRAFT_CTA_MAP)).toHaveLength(4);
+    expect(AUDIENCE_DRAFT_CTA_MAP.reply_to_schedule).toBeTruthy();
+    expect(AUDIENCE_DRAFT_CTA_MAP.visit_medcurity).toBeTruthy();
+    expect(AUDIENCE_DRAFT_CTA_MAP.reply_to_learn_more).toBeTruthy();
+    expect(AUDIENCE_DRAFT_CTA_MAP.book_a_demo).toBeTruthy();
+  });
+});
+
+// ── Edit audience remount ─────────────────────────────────────────────
+
+describe("Edit audience resets AiAudienceFlow to brief entry", () => {
+  it("AiAudienceFlow has a key prop driven by nonce for remount", () => {
+    const wizard = read("src/features/playbook/CampaignWizard.tsx");
+    expect(wizard).toContain("key={aiFlowNonce}");
+    expect(wizard).toContain("aiFlowNonce");
+  });
+  it("Edit audience button bumps nonce", () => {
+    const wizard = read("src/features/playbook/CampaignWizard.tsx");
+    expect(wizard).toContain("setAiFlowNonce((n) => n + 1)");
+  });
+});
+
+// ── Retention fail-closed ─────────────────────────────────────────────
+
+describe("retention migration fail-closed", () => {
+  const migration = read("supabase/migrations/20260822020000_campaign_audience_provenance.sql");
+  it("requires pg_cron (raises exception if missing)", () => {
+    expect(migration).toContain("raise exception 'pg_cron extension is required");
+  });
+  it("unschedules idempotently via cron.job lookup, not exception swallowing", () => {
+    expect(migration).toContain("select jobname from cron.job");
+    expect(migration).not.toMatch(/exception when others then null/);
+  });
+  it("asserts both jobs exist after scheduling", () => {
+    expect(migration).toContain("Failed to schedule audience-provenance-redact-daily");
+    expect(migration).toContain("Failed to schedule audience-interpretations-cleanup-daily");
+  });
+});
+
+// ── Training-note isolation recheck ───────────────────────────────────
+
+describe("training-note isolation", () => {
+  it("audienceDraftGenerateSystem takes no parameters (no training notes)", () => {
+    const prompts = read("supabase/functions/_shared/playbook-prompts.ts");
+    expect(prompts).toMatch(/export function audienceDraftGenerateSystem\(\):\s*string/);
+  });
+  it("generateAudienceDraft does not reference allTrainingNotes or formatTrainingNotes", () => {
+    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+    const fnBlock = edgeFn.slice(
+      edgeFn.indexOf("async function generateAudienceDraft"),
+      edgeFn.indexOf("// ── HTTP handler"),
+    );
+    expect(fnBlock).not.toContain("allTrainingNotes");
+    expect(fnBlock).not.toContain("formatTrainingNotes");
+  });
+  it("admin generate-campaign still uses training notes", () => {
+    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+    const adminBlock = edgeFn.slice(
+      edgeFn.indexOf("async function generateCampaign"),
+      edgeFn.indexOf("async function suggestCampaign"),
+    );
+    expect(adminBlock).toContain("allTrainingNotes");
+    expect(adminBlock).toContain("formatTrainingNotes");
+  });
+});
+
+// ── Structured schema: edge function renders HTML server-side ─────────
+
+describe("generate-audience-draft: structured schema + server rendering", () => {
+  it("edge function imports and calls renderAudienceDraftEmail", () => {
+    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+    expect(edgeFn).toContain("renderAudienceDraftEmail");
+    expect(edgeFn).toContain("AUDIENCE_DRAFT_CTA_MAP");
+  });
+  it("edge function validates structured intent fields before rendering", () => {
+    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+    const fnBlock = edgeFn.slice(
+      edgeFn.indexOf("async function generateAudienceDraft"),
+      edgeFn.indexOf("// ── HTTP handler"),
+    );
+    expect(fnBlock).toContain("body_paragraphs");
+    expect(fnBlock).toContain("greeting_name");
+    expect(fnBlock).toContain("cta");
+    // Validates the rendered output too
+    expect(fnBlock).toContain("validateAudienceDraft");
+  });
+  it("returns bounded actionable error list (up to 5)", () => {
+    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+    expect(edgeFn).toContain("validationErrors.slice(0, 5)");
   });
 });
