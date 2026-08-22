@@ -436,6 +436,126 @@ export function normalizeEmail(email: string | null | undefined): string {
   return (email ?? "").trim().toLowerCase();
 }
 
+// ── Contact identity grouping (pure, deterministic, testable) ────────
+//
+// Groups contacts into canonical recipients by connected email identity.
+// Any contacts sharing ANY plausible normalized email belong to one group.
+// Uses union-find for O(n*alpha(n)) performance.
+
+export interface ContactIdentity {
+  contactId: string;
+  primaryEmail: string;
+  allEmails: string[];          // normalized, deduplicated
+  reasons: string[];
+  isAmbiguous: boolean;
+  snapshot: Record<string, unknown>;
+}
+
+export interface IdentityGroup {
+  /** Deterministic canonical: lowest contactId in the group. */
+  canonicalContactId: string;
+  /** Primary email of the canonical contact (used for enrollment). */
+  canonicalEmail: string;
+  /** ALL emails across every contact in this group. */
+  allEmails: string[];
+  /** Union of all reason codes. */
+  reasons: string[];
+  /** True if any contact in the group is ambiguous. */
+  isAmbiguous: boolean;
+  /** Snapshot from the canonical contact. */
+  snapshot: Record<string, unknown>;
+  /** Number of contacts merged (1 = no duplicates). */
+  contactCount: number;
+}
+
+class UnionFind {
+  private parent: number[];
+  private rank: number[];
+  constructor(n: number) {
+    this.parent = Array.from({ length: n }, (_, i) => i);
+    this.rank = new Array(n).fill(0);
+  }
+  find(x: number): number {
+    if (this.parent[x] !== x) this.parent[x] = this.find(this.parent[x]);
+    return this.parent[x];
+  }
+  union(a: number, b: number): void {
+    const ra = this.find(a), rb = this.find(b);
+    if (ra === rb) return;
+    if (this.rank[ra] < this.rank[rb]) this.parent[ra] = rb;
+    else if (this.rank[ra] > this.rank[rb]) this.parent[rb] = ra;
+    else { this.parent[rb] = ra; this.rank[ra]++; }
+  }
+}
+
+/**
+ * Group contacts by connected email identity. Pure, deterministic.
+ * Returns one IdentityGroup per connected component, ordered by
+ * canonical contactId (lowest in group). allEmails is the full union
+ * of every email in the component. reasons is the union of all
+ * contact-level reasons. contactCount is truthful.
+ */
+export function groupContactIdentities(contacts: ContactIdentity[]): IdentityGroup[] {
+  if (contacts.length === 0) return [];
+
+  const uf = new UnionFind(contacts.length);
+  const emailToFirstIdx = new Map<string, number>();
+
+  // Build connected components: any shared email unions two contacts
+  for (let i = 0; i < contacts.length; i++) {
+    for (const em of contacts[i].allEmails) {
+      const prev = emailToFirstIdx.get(em);
+      if (prev !== undefined) {
+        uf.union(prev, i);
+      } else {
+        emailToFirstIdx.set(em, i);
+      }
+    }
+  }
+
+  // Collect groups by root
+  const groups = new Map<number, number[]>();
+  for (let i = 0; i < contacts.length; i++) {
+    const root = uf.find(i);
+    const arr = groups.get(root);
+    if (arr) arr.push(i); else groups.set(root, [i]);
+  }
+
+  // Build output groups
+  const result: IdentityGroup[] = [];
+  for (const memberIndices of groups.values()) {
+    // Deterministic canonical: lowest contactId
+    memberIndices.sort((a, b) => contacts[a].contactId < contacts[b].contactId ? -1 : 1);
+    const canonical = contacts[memberIndices[0]];
+    const allEmails = new Set<string>();
+    const reasons = new Set<string>();
+    let isAmbiguous = false;
+
+    for (const idx of memberIndices) {
+      const c = contacts[idx];
+      for (const em of c.allEmails) allEmails.add(em);
+      for (const r of c.reasons) reasons.add(r);
+      if (c.isAmbiguous) isAmbiguous = true;
+    }
+
+    if (memberIndices.length > 1) reasons.add("duplicate_contact");
+
+    result.push({
+      canonicalContactId: canonical.contactId,
+      canonicalEmail: canonical.primaryEmail,
+      allEmails: [...allEmails],
+      reasons: [...reasons],
+      isAmbiguous,
+      snapshot: canonical.snapshot,
+      contactCount: memberIndices.length,
+    });
+  }
+
+  // Deterministic output order: by canonicalContactId
+  result.sort((a, b) => a.canonicalContactId < b.canonicalContactId ? -1 : 1);
+  return result;
+}
+
 /**
  * Validate a model-provided label (campaign_name, target_audience) as
  * safe single-line plain text. Returns an error string or null if valid.
@@ -445,9 +565,9 @@ export function normalizeEmail(email: string | null | undefined): string {
 export function validateSafeLabel(s: string, field: string): string | null {
   if (!s.trim()) return `${field} is empty`;
   if (s.length > 80) return `${field} exceeds 80 characters`;
-  // D3: ASCII controls + Unicode zero-width/bidi/separator characters
+  // ASCII controls + Unicode zero-width/bidi/separator/word-joiner chars
   // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x1f\x7f\u200B-\u200F\u2028-\u202F\uFEFF]/.test(s)) return `${field} contains control characters`;
+  if (/[\x00-\x1f\x7f\u200B-\u200F\u2028-\u202F\u2060\u2066-\u2069\uFEFF]/.test(s)) return `${field} contains control characters`;
   if (/<[^>]*>/.test(s)) return `${field} contains HTML`;
   if (/https?:|ftp:|mailto:|www\.|:\/\//i.test(s)) return `${field} contains URL/protocol`;
   if (/[a-z0-9.-]+\.[a-z]{2,}/i.test(s) && !/\bmedcurity\.com\b/i.test(s)) return `${field} contains domain`;

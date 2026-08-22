@@ -65,7 +65,9 @@ import {
   PRIVACY_SCREEN_VERSION,
   isStagingProject,
   validateAudienceDraft,
+  groupContactIdentities,
   type AudienceDraftPayload,
+  type ContactIdentity,
 } from "../_shared/audience-spec.ts";
 
 const corsHeaders = {
@@ -681,12 +683,13 @@ async function interpretAudience(brief: string, userId: string): Promise<Record<
     us_state_codes: US_STATE_CODES,
   };
 
-  // D4: XML-delimit user brief to reduce prompt injection surface
+  // XML-delimit user brief with entity-escaping to prevent delimiter bypass
   const modelId = PLAYBOOK_IDEAS_MODEL;
+  const escapedBrief = trimmed.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const text = await callClaude({
     model: modelId,
     system: audienceInterpretSystem(vocabulary),
-    user: `<user_brief>${trimmed}</user_brief>`,
+    user: `<user_brief>${escapedBrief}</user_brief>`,
     maxTokens: 1500,
     temperature: 0.2,
   });
@@ -886,21 +889,12 @@ async function resolveAudience(
     snapshot_account_name: string | null;
   }
 
-  const members: MemberRow[] = [];
-  const seenEmails = new Map<string, number>();
+  // Phase 1: collect raw matched contacts with per-contact reasons/emails
+  const rawContacts: ContactIdentity[] = [];
   let totalScanned = 0;
-  // D1: map secondary emails (email2/email3) to ALL canonical member
-  // indices sharing that secondary identity, so suppression checks cover
-  // every contact-level email. Campaign still enrolls only the primary
-  // email; secondary suppression makes the canonical member excluded.
-  const secondaryEmailToMembers = new Map<string, number[]>();
   let scanTruncated = false;
-  let totalDuplicateContacts = 0;
-
-  // Keyset pagination: track the last processed contact ID
   let lastContactId = "00000000-0000-0000-0000-000000000000";
   const CONTACT_PAGE = 1000;
-
   while (totalScanned < SCAN_HARD_CAP) {
     const query = userDb
       .from("contacts")
@@ -928,6 +922,7 @@ async function resolveAudience(
     if (contacts.length === 0) break;
 
     for (const c of contacts) {
+      if (totalScanned >= SCAN_HARD_CAP) break;
       totalScanned++;
       lastContactId = c.id;
 
@@ -935,49 +930,26 @@ async function resolveAudience(
       const primaryEmail = normalizeEmail(c.email);
       if (!primaryEmail || !isPlausibleEmail(primaryEmail)) continue;
 
-      // Client-side targeting filter: match / ambiguous / nonmatch
+      // Client-side targeting filter
       let isNonmatch = false;
-
-      if (icSet) {
-        if (a.industry_category && !icSet.has(a.industry_category)) {
-          isNonmatch = true;
-        }
-      }
-      if (psSet && !isNonmatch) {
-        if (a.project_segment && !psSet.has(a.project_segment)) {
-          isNonmatch = true;
-        }
-      }
+      if (icSet && a.industry_category && !icSet.has(a.industry_category)) isNonmatch = true;
+      if (psSet && !isNonmatch && a.project_segment && !psSet.has(a.project_segment)) isNonmatch = true;
       let matchedStateCode: string | null = null;
       if (stateSet && !isNonmatch) {
         const billingCode = canonicalizeStateCode(a.billing_state);
         const mailingCode = canonicalizeStateCode(c.mailing_state);
         const billingMatch = billingCode && stateSet.has(billingCode);
         const mailingMatch = mailingCode && stateSet.has(mailingCode);
-        if ((billingCode || mailingCode) && !billingMatch && !mailingMatch) {
-          isNonmatch = true;
-        }
+        if ((billingCode || mailingCode) && !billingMatch && !mailingMatch) isNonmatch = true;
         matchedStateCode = billingMatch ? billingCode : mailingMatch ? mailingCode : null;
       }
-
       if (isNonmatch) continue;
 
       const reasons: string[] = [];
-
       let isAmbiguous = false;
-      if (icSet && !a.industry_category) {
-        reasons.push("no_industry_category_set");
-        isAmbiguous = true;
-      }
-      if (psSet && !a.project_segment) {
-        reasons.push("no_project_segment_set");
-        isAmbiguous = true;
-      }
-      if (stateSet && !a.billing_state && !c.mailing_state) {
-        reasons.push("no_state_set");
-        isAmbiguous = true;
-      }
-
+      if (icSet && !a.industry_category) { reasons.push("no_industry_category_set"); isAmbiguous = true; }
+      if (psSet && !a.project_segment) { reasons.push("no_project_segment_set"); isAmbiguous = true; }
+      if (stateSet && !a.billing_state && !c.mailing_state) { reasons.push("no_state_set"); isAmbiguous = true; }
       if (a.customer_status === "client") reasons.push("customer_account");
       if (a.customer_status === "former_client") reasons.push("former_customer_account");
       if (partnerAccountIds.has(a.id)) reasons.push("partner_account");
@@ -985,97 +957,101 @@ async function resolveAudience(
       if (a.do_not_contact) reasons.push("account_do_not_contact");
       if (c.no_longer_employed) reasons.push("contact_no_longer_employed");
 
-      const existingIdx = seenEmails.get(primaryEmail);
-      if (existingIdx !== undefined) {
-        totalDuplicateContacts++;
-        const canonical = members[existingIdx];
-        // Union ALL safety-relevant reasons from this duplicate contact
-        // into the canonical member. Any exclusion on ANY duplicate
-        // prevents eligibility (customer, partner, DNC, etc.).
-        for (const r of reasons) {
-          if (!canonical.reason_codes.includes(r)) canonical.reason_codes.push(r);
-        }
-        if (isAmbiguous && canonical.disposition === "eligible") {
-          canonical.disposition = "ambiguous";
-        }
-        const hasExclusions = canonical.reason_codes.some((r) =>
-          r === "customer_account" || r === "former_customer_account" ||
-          r === "partner_account" || r === "contact_do_not_contact" ||
-          r === "account_do_not_contact" || r === "contact_no_longer_employed"
-        );
-        if (hasExclusions && canonical.disposition !== "excluded") {
-          canonical.disposition = "excluded";
-        }
-        // Count without embedding contact/account IDs in reason strings
-        if (!canonical.reason_codes.includes("duplicate_contact")) {
-          canonical.reason_codes.push("duplicate_contact");
-        }
-        continue;
-      }
-
-      const hasExclusions = reasons.some((r) =>
-        r === "customer_account" || r === "former_customer_account" ||
-        r === "partner_account" || r === "contact_do_not_contact" ||
-        r === "account_do_not_contact" || r === "contact_no_longer_employed"
-      );
-      // Deterministic precedence: excluded > ambiguous > eligible.
-      // Exclusion safety always outranks ambiguity.
-      const disposition = hasExclusions ? "excluded" : isAmbiguous ? "ambiguous" : "eligible";
-
-      const memberIdx = members.length;
-      seenEmails.set(primaryEmail, memberIdx);
-      members.push({
-        contact_id: c.id,
-        account_id: a.id,
-        email_normalized: primaryEmail,
-        disposition,
-        reason_codes: reasons,
-        snapshot_industry_category: a.industry_category,
-        snapshot_project_segment: a.project_segment,
-        snapshot_state: matchedStateCode ?? canonicalizeStateCode(a.billing_state) ?? canonicalizeStateCode(c.mailing_state),
-        snapshot_customer_status: a.customer_status,
-        snapshot_account_type: a.account_type,
-        snapshot_account_name: a.name,
-      });
-
-      // D1: register secondary emails for suppression coverage
+      // Collect all plausible emails
+      const allEmails = [primaryEmail];
       for (const alt of [c.email2, c.email3]) {
         const norm = normalizeEmail(alt);
-        if (norm && norm !== primaryEmail && isPlausibleEmail(norm)) {
-          const existing = secondaryEmailToMembers.get(norm);
-          if (existing) { if (!existing.includes(memberIdx)) existing.push(memberIdx); }
-          else secondaryEmailToMembers.set(norm, [memberIdx]);
+        if (norm && norm !== primaryEmail && isPlausibleEmail(norm) && !allEmails.includes(norm)) {
+          allEmails.push(norm);
         }
       }
+
+      rawContacts.push({
+        contactId: c.id,
+        primaryEmail,
+        allEmails,
+        reasons,
+        isAmbiguous,
+        snapshot: {
+          account_id: a.id,
+          industry_category: a.industry_category,
+          project_segment: a.project_segment,
+          state: matchedStateCode ?? canonicalizeStateCode(a.billing_state) ?? canonicalizeStateCode(c.mailing_state),
+          customer_status: a.customer_status,
+          account_type: a.account_type,
+          account_name: a.name,
+        },
+      });
     }
 
     if (contacts.length < CONTACT_PAGE) break;
     if (totalScanned >= SCAN_HARD_CAP) {
-      // Truthful truncation probe: the cap-th contact was processed above;
-      // now check whether more contacts exist beyond it.
       const { data: probe } = await userDb
-        .from("contacts")
-        .select("id")
-        .gt("id", lastContactId)
-        .is("archived_at", null)
-        .not("email", "is", null)
-        .neq("email", "")
-        .limit(1);
+        .from("contacts").select("id")
+        .gt("id", lastContactId).is("archived_at", null)
+        .not("email", "is", null).neq("email", "").limit(1);
       scanTruncated = (probe?.length ?? 0) > 0;
       break;
     }
+  }
+
+  // Phase 2: union-find identity grouping (handles chains and bridges)
+  const identityGroups = groupContactIdentities(rawContacts);
+  const totalDuplicateContacts = rawContacts.length - identityGroups.length;
+
+  // Phase 3: materialize MemberRows from groups
+  const members: MemberRow[] = [];
+  const allUniqueEmails = new Set<string>();
+  const secondaryOnlyEmails = new Set<string>();
+
+  for (const g of identityGroups) {
+    const hasExclusions = g.reasons.some((r) =>
+      r === "customer_account" || r === "former_customer_account" ||
+      r === "partner_account" || r === "contact_do_not_contact" ||
+      r === "account_do_not_contact" || r === "contact_no_longer_employed"
+    );
+    const disposition = hasExclusions ? "excluded" : g.isAmbiguous ? "ambiguous" : "eligible";
+    const snap = g.snapshot;
+
+    members.push({
+      contact_id: g.canonicalContactId,
+      account_id: snap.account_id as string,
+      email_normalized: g.canonicalEmail,
+      disposition,
+      reason_codes: g.reasons,
+      snapshot_industry_category: snap.industry_category as string | null,
+      snapshot_project_segment: snap.project_segment as string | null,
+      snapshot_state: snap.state as string | null,
+      snapshot_customer_status: snap.customer_status as string | null,
+      snapshot_account_type: snap.account_type as string | null,
+      snapshot_account_name: snap.account_name as string | null,
+    });
+
+    for (const em of g.allEmails) {
+      allUniqueEmails.add(em);
+      if (em !== g.canonicalEmail) secondaryOnlyEmails.add(em);
+    }
+  }
+
+  // Build email→member index for suppression propagation
+  const emailToMemberIdx = new Map<string, number>();
+  for (let i = 0; i < members.length; i++) {
+    const g = identityGroups[i];
+    for (const em of g.allEmails) emailToMemberIdx.set(em, i);
   }
 
   // 4. Service-role checks: suppression + active enrollments.
   //    Run against ALL matched canonical emails (not just eligible) so
   //    an ambiguous unsubscribed/bounced record is recorded as excluded,
   //    and active enrollment is surfaced consistently.
-  // D1: include secondary emails in suppression/enrollment checks so a
-  // bounced/unsubscribed email2/email3 makes the contact excluded.
-  const allMatchedEmails = [
-    ...members.map((m) => m.email_normalized),
-    ...secondaryEmailToMembers.keys(),
-  ];
+  // Deduplicated email set for suppression/enrollment checks.
+  // Invariant: at most SCAN_HARD_CAP contacts * 3 emails = 30,000.
+  // Fail-closed if violated rather than silently skipping emails.
+  const MAX_IDENTITY_EMAILS = SCAN_HARD_CAP * 3;
+  if (allUniqueEmails.size > MAX_IDENTITY_EMAILS) {
+    throw new Error(`Identity email count ${allUniqueEmails.size} exceeds invariant ${MAX_IDENTITY_EMAILS}`);
+  }
+  const allMatchedEmails = [...allUniqueEmails];
 
   // Suppression check (batched + paginated)
   const suppressionMap = new Map<string, string[]>();
@@ -1126,48 +1102,30 @@ async function resolveAudience(
     }
   }
 
-  // D1: propagate secondary email suppression/enrollment hits to ALL
-  // canonical members sharing that secondary identity. This ensures a
-  // contact with a clean primary but bounced email2 becomes excluded.
-  for (const [secEmail, memberIndices] of secondaryEmailToMembers) {
-    const suppReasons = suppressionMap.get(secEmail);
-    for (const idx of memberIndices) {
-      const m = members[idx];
-      if (suppReasons?.length) {
-        for (const r of suppReasons) {
-          if (!m.reason_codes.includes(r)) m.reason_codes.push(r);
-        }
-        if (!m.reason_codes.includes("secondary_email_suppressed")) {
-          m.reason_codes.push("secondary_email_suppressed");
-        }
-      }
-      if (activeEnrollmentEmails.has(secEmail)) {
-        if (!m.reason_codes.includes("active_enrollment_elsewhere")) {
-          m.reason_codes.push("active_enrollment_elsewhere");
-        }
-      }
-    }
-  }
-
-  // Apply suppression + enrollment to ALL matched members, then enforce
-  // deterministic precedence: excluded > active_enrollment > ambiguous > eligible.
-  for (const m of members) {
-    const suppReasons = suppressionMap.get(m.email_normalized);
+  // Propagate ALL email suppression/enrollment hits to canonical members.
+  // For each registered email (primary or secondary), if it's suppressed or
+  // enrolled, propagate to its canonical member. Then re-derive disposition.
+  for (const [email, memberIdx] of emailToMemberIdx) {
+    const m = members[memberIdx];
+    const suppReasons = suppressionMap.get(email);
     if (suppReasons?.length) {
       for (const r of suppReasons) {
         if (!m.reason_codes.includes(r)) m.reason_codes.push(r);
       }
+      // Mark secondary email source for provenance
+      if (secondaryOnlyEmails.has(email) && !m.reason_codes.includes("secondary_email_suppressed")) {
+        m.reason_codes.push("secondary_email_suppressed");
+      }
     }
-    const hasEnrollment = activeEnrollmentEmails.has(m.email_normalized) ||
-      m.reason_codes.includes("active_enrollment_elsewhere");
-    if (hasEnrollment && !m.reason_codes.includes("active_enrollment_elsewhere")) {
-      m.reason_codes.push("active_enrollment_elsewhere");
+    if (activeEnrollmentEmails.has(email)) {
+      if (!m.reason_codes.includes("active_enrollment_elsewhere")) {
+        m.reason_codes.push("active_enrollment_elsewhere");
+      }
     }
+  }
 
-    // Re-derive disposition with deterministic precedence.
-    // v_marketing_suppression is authoritative: ANY row it returns is an
-    // exclusion, regardless of reason string. Secondary email suppression
-    // also counts (D1).
+  // Re-derive disposition with deterministic precedence for all members.
+  for (const m of members) {
     const isSuppressed = suppressionMap.has(m.email_normalized) ||
       m.reason_codes.includes("secondary_email_suppressed");
     const hasDirectExclusion = m.reason_codes.some((r) =>
@@ -1175,6 +1133,7 @@ async function resolveAudience(
       r === "partner_account" || r === "contact_do_not_contact" ||
       r === "account_do_not_contact" || r === "contact_no_longer_employed"
     );
+    const hasEnrollment = m.reason_codes.includes("active_enrollment_elsewhere");
     const hasAmbiguity = m.reason_codes.some((r) =>
       r === "no_industry_category_set" || r === "no_project_segment_set" || r === "no_state_set"
     );
@@ -1314,11 +1273,12 @@ async function generateAudienceDraft(description: string): Promise<Record<string
   // output, endpoints, and internal details are never exposed.
   let parsed: Record<string, unknown>;
   try {
-    // D4: XML-delimit user input
+    // XML-delimit with entity-escaping
+    const escapedDesc = trimmed.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const text = await callClaude({
       model: PLAYBOOK_IDEAS_MODEL,
       system: audienceDraftGenerateSystem(),
-      user: `<user_brief>${trimmed}</user_brief>`,
+      user: `<user_brief>${escapedDesc}</user_brief>`,
       maxTokens: 4000,
       temperature: 0.7,
     });
@@ -1613,11 +1573,16 @@ Deno.serve(async (req) => {
       ));
     }
 
-    return json({ error: `Unknown action: ${action}` }, 400);
+    // Do not reflect model-provided action value
+    return json({ error: "Unknown action" }, 400);
   } catch (e) {
     if (e instanceof AudienceActionError) {
       return json({ error: e.message, retryable: e.retryable }, e.status);
     }
-    return json({ error: (e as Error).message }, 500);
+    // Never expose raw Postgres/Supabase/provider errors to the client.
+    // Log server-side for debugging; return fixed server-owned copy.
+    const reqId = crypto.randomUUID().slice(0, 8);
+    console.error(`[playbook-ai:${reqId}]`, (e as Error).message);
+    return json({ error: "An unexpected error occurred. Please try again.", request_id: reqId }, 500);
   }
 });

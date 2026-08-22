@@ -504,30 +504,21 @@ describe("Blocker 5: True keyset pagination + truncation probe", () => {
     expect(contactLoop).not.toContain(".range(");
   });
 
-  it("truthful truncation probe at SCAN_HARD_CAP queries for one more row", () => {
-    expect(resolveFn).toContain("Truthful truncation probe");
+  it("truncation probe queries for one more row after cap", () => {
     expect(resolveFn).toContain(".limit(1)");
     expect(resolveFn).toContain("probe");
+    expect(resolveFn).toContain("scanTruncated");
   });
 
-  it("processes the cap-th contact before probing (no pre-process break)", () => {
-    // The for-loop body must NOT break before processing the contact.
-    // The truncation check happens AFTER the for-loop (outside), not inside it.
+  it("inner loop breaks at exact SCAN_HARD_CAP before processing", () => {
     const contactLoop = resolveFn.slice(
       resolveFn.indexOf("while (totalScanned < SCAN_HARD_CAP)"),
-      resolveFn.indexOf("// 4. Service-role checks"),
+      resolveFn.indexOf("// Phase 2"),
     );
-    const forBody = contactLoop.slice(
-      contactLoop.indexOf("for (const c of contacts)"),
-      contactLoop.indexOf("if (contacts.length < CONTACT_PAGE)"),
-    );
-    // The for-loop body must not contain the truncation probe —
-    // it happens after the for-loop completes the page.
-    expect(forBody).not.toContain("Truthful truncation probe");
-    // The for-loop body must process: accounts, email, disposition, push
-    expect(forBody).toContain("c.accounts");
-    expect(forBody).toContain("normalizeEmail");
-    expect(forBody).toContain("members.push");
+    // Inner break prevents processing past the cap
+    expect(contactLoop).toContain("if (totalScanned >= SCAN_HARD_CAP) break");
+    // Collects raw contacts (not members.push inline)
+    expect(contactLoop).toContain("rawContacts.push");
   });
 });
 
@@ -696,7 +687,7 @@ describe("resolveAudience — structural guarantees", () => {
   it("unfiltered spec guard", () => { expect(fn).toContain("isUnfilteredSpec"); expect(fn).toContain("would match all contacts"); });
   it("invalid email exclusion", () => { expect(fn).toContain("isPlausibleEmail"); });
   it("no server-side .in() for targeting (NULL ambiguity)", () => { expect(fn).not.toContain('.in("accounts.industry_category"'); });
-  it("canonical duplicate representation (no embedded IDs)", () => { expect(fn).toContain('"duplicate_contact"'); expect(fn).not.toContain("duplicate_contact:${"); });
+  it("identity grouping via groupContactIdentities (no embedded IDs)", () => { expect(fn).toContain("groupContactIdentities"); expect(fn).not.toContain("duplicate_contact:${"); });
   it("authoritative partner source", () => { expect(fn).toContain('"v_partner_accounts"'); expect(fn).not.toContain('.startsWith("partner")'); });
   it("transactional RPC (not direct insert)", () => { expect(fn).toContain("create_audience_run_with_members"); expect(fn).not.toContain('.from("campaign_audience_runs")'); });
   it("no Smartlead, no launch", () => { expect(fn.toLowerCase()).not.toContain("smartlead"); });

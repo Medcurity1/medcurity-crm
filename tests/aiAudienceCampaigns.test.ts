@@ -943,27 +943,23 @@ describe("audit 4 fix 2: Done bypasses discard guard after AI draft save", () =>
 });
 
 describe("audit 4 fix 3: duplicate safety union", () => {
-  it("unions all safety reasons from duplicate contacts into canonical member", () => {
+  it("uses groupContactIdentities for union-find identity consolidation", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    expect(edgeFn).toContain("Union ALL safety-relevant reasons");
-    expect(edgeFn).toContain("canonical.reason_codes.includes(r)");
+    expect(edgeFn).toContain("groupContactIdentities(rawContacts)");
   });
 
   it("does not embed contact/account IDs in reason strings", () => {
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    // duplicate_contact is added by groupContactIdentities, not inline
+    expect(spec).toContain('"duplicate_contact"');
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    const resolveBlock = edgeFn.slice(
-      edgeFn.indexOf("async function resolveAudience"),
-      edgeFn.indexOf("// ── AI Audience: generate-audience-draft"),
-    );
-    // No template-literal ID embedding in reason codes
-    expect(resolveBlock).not.toContain("duplicate_contact:${");
-    expect(resolveBlock).toContain('"duplicate_contact"');
+    expect(edgeFn).not.toContain("duplicate_contact:${");
   });
 
-  it("promotes canonical disposition to excluded when any duplicate has exclusion", () => {
+  it("exclusion outranks ambiguity in group materialization", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    expect(edgeFn).toContain('hasExclusions && canonical.disposition !== "excluded"');
-    expect(edgeFn).toContain('canonical.disposition = "excluded"');
+    // Phase 3 materialization uses hasExclusions before isAmbiguous
+    expect(edgeFn).toMatch(/hasExclusions \? "excluded" : g\.isAmbiguous/);
   });
 });
 
@@ -1119,10 +1115,8 @@ describe("review 5 fix 1: aiDraftSaved re-dirties on edits after save", () => {
 describe("review 5 fix 2: disposition precedence", () => {
   it("initial disposition: excluded outranks ambiguous", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    // The line must be: hasExclusions ? "excluded" : isAmbiguous ? "ambiguous" : "eligible"
-    // NOT: isAmbiguous ? "ambiguous" : hasExclusions ? "excluded" : "eligible"
-    expect(edgeFn).toMatch(/hasExclusions \? "excluded" : isAmbiguous \? "ambiguous" : "eligible"/);
-    expect(edgeFn).not.toMatch(/isAmbiguous \? "ambiguous" : hasExclusions \? "excluded"/);
+    // Phase 3 materialization: hasExclusions before g.isAmbiguous
+    expect(edgeFn).toMatch(/hasExclusions \? "excluded" : g\.isAmbiguous \? "ambiguous" : "eligible"/);
   });
 
   it("suppression/enrollment checks run on ALL matched emails, not just eligible", () => {
@@ -1147,7 +1141,7 @@ describe("review 5 fix 2: disposition precedence", () => {
   it("suppression reasons added to ALL members, not skipped for non-eligible", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
     const applyBlock = edgeFn.slice(
-      edgeFn.indexOf("Apply suppression + enrollment to ALL"),
+      edgeFn.indexOf("Propagate ALL email suppression"),
       edgeFn.indexOf("// 5. Apply max_results"),
     );
     // The loop must NOT have "if disposition !== eligible continue"
@@ -1223,7 +1217,7 @@ describe("review 6: v_marketing_suppression is authoritative", () => {
   it("uses suppressionMap.has (boolean) not reason-string enumeration for exclusion", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
     const applyBlock = edgeFn.slice(
-      edgeFn.indexOf("Apply suppression + enrollment to ALL"),
+      edgeFn.indexOf("Propagate ALL email suppression"),
       edgeFn.indexOf("// 5. Apply max_results"),
     );
     // Must use suppressionMap.has as the authoritative suppression signal
@@ -1239,20 +1233,19 @@ describe("review 6: v_marketing_suppression is authoritative", () => {
   it("still preserves reason strings from suppression view for provenance", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
     const applyBlock = edgeFn.slice(
-      edgeFn.indexOf("Apply suppression + enrollment to ALL"),
+      edgeFn.indexOf("Propagate ALL email suppression"),
       edgeFn.indexOf("// 5. Apply max_results"),
     );
     // Reason codes from suppression view are pushed onto the member for provenance
     expect(applyBlock).toContain("m.reason_codes.push(r)");
   });
 
-  it("comments explain v_marketing_suppression is authoritative for any reason", () => {
+  it("suppression propagation covers ALL registered emails including secondary", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    expect(edgeFn).toContain("v_marketing_suppression is authoritative");
-    expect(edgeFn).toContain("ANY row it returns is an");
-    // D1: comment now mentions secondary email suppression instead of
-    // enumerating individual lead-level reason strings
-    expect(edgeFn).toContain("Secondary email suppression");
+    expect(edgeFn).toContain("secondary_email_suppressed");
+    expect(edgeFn).toContain("secondaryOnlyEmails.has(email)");
+    // Uses suppressionMap.has for authoritative exclusion
+    expect(edgeFn).toContain("suppressionMap.has(m.email_normalized)");
   });
 
   it("isSuppressed || hasDirectExclusion drives excluded disposition", () => {
