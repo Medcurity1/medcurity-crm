@@ -294,28 +294,29 @@ PERSONALIZATION TOKENS — use ONLY these exact tokens:
 - [[Signature]] — inserts the sender's configured signature. MUST appear exactly once as the LAST line of every email body. NEVER write 'Best,' or 'The Medcurity Team' or any other sign-off before it.
 
 FORBIDDEN — do NOT use any of these:
-- Handlebars: {{#if ...}}, {{else}}, {{/if}}, {{variable}}, {%...%}
+- Handlebars: {{#if ...}}, {{else}}, {{/if}}, {{variable}}
+- Template syntax: {%...%}, ${...}, <%...%>
 - Smartlead syntax: %signature%, {{first_name}}, {{company_name}}, {{sender_name}}
-- Any template syntax not listed above
-- Markdown links like [text](url) — use HTML <a href="url">text</a> instead
+- Markdown: [text](url), # headings, **bold**, *italic*, ``` code blocks, bullet lists
+- Do NOT generate any clickable links (<a> tags). Write plain-text CTAs instead: "Visit medcurity.com to learn more" rather than embedding a hyperlink.
 
-HTML RULES — email bodies must use ONLY these tags:
-- <p>...</p> for paragraphs
-- <br> for line breaks within a paragraph
-- <strong>...</strong> or <b>...</b> for bold
-- <em>...</em> or <i>...</i> for italic
-- <a href="https://...">link text</a> for links (must use href with full URL)
-- No other HTML tags. No inline styles. No images. No tables. No divs.
+HTML RULES — email bodies must use ONLY these tags with NO attributes:
+- <p>...</p> for paragraphs (no class, style, id, or any attribute)
+- <br> for line breaks (no attributes)
+- <strong>...</strong> or <b>...</b> for bold (no attributes)
+- <em>...</em> or <i>...</i> for italic (no attributes)
+- No <a>, <img>, <div>, <span>, <table>, <ul>, <li>, or any other tag.
 
 CONTENT INTEGRITY — hard rules:
-- NEVER invent statistics, numbers, customer counts, or quantitative claims. Do not write "1,000+ organizations", "serving X customers", "Y% improvement", or any number not explicitly provided in the training notes below.
-- NEVER make compliance, legal, regulatory, or certification claims unless explicitly stated in the training notes.
-- NEVER fabricate case studies, testimonials, outcomes, or guarantees.
-- If no specific claim is provided, write generally: "healthcare organizations like yours" not "1,000+ healthcare organizations".
+- NEVER invent statistics, numbers, customer counts, or quantitative claims. Do not write "1,000+ organizations", "serving X customers", "Y% improvement", or any number not from training notes.
+- NEVER make compliance, legal, regulatory, or certification claims (e.g. "ensures compliance", "fully compliant", "certified") unless explicitly in training notes.
+- NEVER fabricate case studies, testimonials, outcomes, guarantees, or "proven results".
+- NEVER use urgency/deadline language: "Act now", "limited time", "don't miss out".
+- If no specific claim is provided, write generally: "healthcare organizations like yours".
 
 CTA RULES:
-- Use only CTAs that match what Medcurity actually offers: 'Learn more at medcurity.com', 'See how it works', 'Book a quick demo', 'Schedule a call'
-- Do NOT invent CTAs. Keep them low-friction.
+- Use plain-text CTAs: "Visit medcurity.com to learn more", "Reply to schedule a call"
+- Do NOT generate hyperlinks. Keep CTAs low-friction.
 
 ${trainingNotesStr}
 
@@ -337,11 +338,12 @@ Respond in JSON only. No markdown, no preamble.
 }
 
 Rules:
-- Exactly 3 emails. First delay is 0. Follow-ups spaced 3-4 days apart.
-- Every email body MUST end with <p>[[Signature]]</p> as the last element.
-- Greetings use [[First name]]. Do not use any other personalization token besides the three listed above.
+- Exactly 3 emails. seq_number must be 1, 2, 3. First delay_days is 0. Follow-ups delay_days exactly 3 or 4.
+- Every email body MUST end with the exact paragraph <p>[[Signature]]</p> as the last element. No sign-offs before it.
+- First email MUST begin with a greeting containing [[First name]], e.g. "<p>Hi [[First name]],</p>".
 - Body concise: first email under 150 words, follow-ups under 100 words.
-- Subject lines under 60 characters. Each email gets its own subject.`;
+- Subjects: plain text only, under 60 characters, no HTML, no [[Signature]].
+- No links, no URLs in HTML tags. Write "Visit medcurity.com" as plain text if needed.`;
 }
 
 /** Word-overlap duplicate check for training notes (server.js:7117). */

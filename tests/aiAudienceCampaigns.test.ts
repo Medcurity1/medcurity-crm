@@ -233,10 +233,11 @@ describe("AI audience provenance", () => {
     expect(migration).toContain("audience_members_immutable_guard");
   });
 
-  it("UI shows source provenance label (CRM only, model ID)", () => {
+  it("UI shows source provenance label (CRM only, Interpreted by Pulse AI)", () => {
     const flow = read("src/features/playbook/AiAudienceFlow.tsx");
     expect(flow).toContain("Pulse CRM only. No external data providers.");
-    expect(flow).toContain("interpretation.model_id");
+    expect(flow).toContain("Interpreted by Pulse AI");
+    expect(flow).not.toContain("interpretation.model_id");
   });
 
   it("UI shows AI-resolved audience label in wizard", () => {
@@ -430,10 +431,12 @@ describe("AI audience rep-safe generate-audience-draft (blocker 3)", () => {
     expect(fnBlock).toContain("No DB writes, no Smartlead, no enrollment");
   });
 
-  it("generateAudienceDraft validates exactly 3 emails in the result", () => {
+  it("generateAudienceDraft validates via shared validateAudienceDraft", () => {
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    expect(edgeFn).toContain("AUDIENCE_DRAFT_REQUIRED_EMAILS");
-    expect(edgeFn).toMatch(/parsed\.sequence\.length !== AUDIENCE_DRAFT_REQUIRED_EMAILS/);
+    expect(edgeFn).toContain("validateAudienceDraft");
+    // Sequence count validation now lives in the shared validator
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("sequence must have exactly 3 emails");
   });
 
   it("frontend uses generate-audience-draft, not generate-campaign, for AI audience", () => {
@@ -651,37 +654,40 @@ describe("correction 4: generate-audience-draft hardening", () => {
   });
 
   it("validates campaign_name and target_audience are nonempty and bounded", () => {
+    // Validation now lives in shared validateAudienceDraft
     const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    expect(edgeFn).toContain("AI returned empty campaign_name");
-    expect(edgeFn).toContain("AI returned empty target_audience");
-    expect(edgeFn).toContain("AUDIENCE_DRAFT_MAX_NAME");
+    expect(edgeFn).toContain("validateAudienceDraft");
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("Empty campaign_name");
+    expect(spec).toContain("Empty target_audience");
+    expect(spec).toContain("campaign_name exceeds");
   });
 
   it("validates seq_number must be exactly 1,2,3", () => {
-    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    expect(edgeFn).toMatch(/email\.seq_number !== n/);
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toMatch(/email\.seq_number !== n/);
   });
 
   it("validates delay_days is integer in safe range", () => {
-    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    expect(edgeFn).toContain("AUDIENCE_DRAFT_MAX_DELAY");
-    expect(edgeFn).toContain("Number.isInteger(email.delay_days)");
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("Number.isInteger(email.delay_days)");
+    expect(spec).toContain("delay_days must be an integer");
   });
 
   it("rejects script/style/iframe tags and event handlers", () => {
-    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    expect(edgeFn).toContain("containsUnsafeHtml");
-    expect(edgeFn).toContain("<script");
-    expect(edgeFn).toContain("<style");
-    expect(edgeFn).toContain("<iframe");
-    expect(edgeFn).toMatch(/\\bon\\w\+/); // event handler pattern
-    expect(edgeFn).toContain("javascript");
+    // Validation now in shared validator
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("<script");
+    expect(spec).toContain("<style");
+    expect(spec).toContain("<iframe");
+    expect(spec).toMatch(/\\bon\\w\+/); // event handler pattern
+    expect(spec).toContain("javascript");
   });
 
   it("validates subject and body length bounds", () => {
-    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    expect(edgeFn).toContain("AUDIENCE_DRAFT_MAX_SUBJECT");
-    expect(edgeFn).toContain("AUDIENCE_DRAFT_MAX_BODY");
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("subject exceeds 60 characters");
+    expect(spec).toContain("body has");
   });
 
   it("comments accurately say training-note reads are permitted but no DB writes", () => {
@@ -983,20 +989,17 @@ describe("audit 4 fix 4: state canonicalization", () => {
 
 describe("audit 4 fix 5: reject overlong output, require visible text", () => {
   it("rejects overlong campaign_name instead of truncating", () => {
-    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    expect(edgeFn).toContain(`AI returned campaign_name exceeding`);
+    // Validation now in shared validateAudienceDraft
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("campaign_name exceeds");
     // Must NOT truncate (no slice assignment for campaign_name)
-    const genBlock = edgeFn.slice(
-      edgeFn.indexOf("async function generateAudienceDraft"),
-      edgeFn.indexOf("// ── HTTP handler"),
-    );
-    expect(genBlock).not.toMatch(/parsed\.campaign_name\s*=.*\.slice/);
+    expect(spec).not.toMatch(/raw\.campaign_name\s*=.*\.slice/);
   });
 
   it("requires nonempty visible text after stripping tags", () => {
-    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
-    expect(edgeFn).toContain("no visible text content");
-    expect(edgeFn).toContain("visibleText");
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("no visible text content");
+    expect(spec).toContain("visibleText");
   });
 });
 
@@ -1708,7 +1711,9 @@ describe("audience draft content contract (prompt + validation)", () => {
       prompts.indexOf("/** Word-overlap"),
     );
     expect(promptFn).toContain("Handlebars");
-    expect(promptFn).toContain("Markdown links");
+    // Prompt lists Markdown with specific items (not "Markdown links like [text](url)")
+    expect(promptFn).toContain("Markdown:");
+    expect(promptFn).toContain("[text](url)");
     expect(promptFn).toContain("FORBIDDEN");
   });
 
@@ -1720,84 +1725,99 @@ describe("audience draft content contract (prompt + validation)", () => {
     expect(promptFn).toContain("NEVER invent statistics");
     expect(promptFn).toContain("NEVER make compliance");
     expect(promptFn).toContain("NEVER fabricate");
-    expect(promptFn).toContain("1,000+ healthcare organizations");
+    // Prompt uses "1,000+ organizations" as an example (not "1,000+ healthcare organizations")
+    expect(promptFn).toContain("1,000+ organizations");
   });
 
-  // ── Validation rejects exact bad patterns ──
+  // ── Validation rejects exact bad patterns (now in shared validator) ──
 
-  it("rejects Handlebars {{#if}} conditional", () => {
-    expect(genBlock).toContain("forbidden Handlebars conditional {{#if}}");
-    expect(genBlock).toContain("{{#if");
+  it("genBlock delegates to validateAudienceDraft instead of inline checks", () => {
+    expect(genBlock).toContain("validateAudienceDraft");
+    expect(genBlock).not.toContain("SAFE_TAGS");
+    expect(genBlock).not.toContain("containsUnsafeHtml");
+    expect(genBlock).not.toContain("forbidden Handlebars");
+    expect(genBlock).not.toContain("unknown token");
+    expect(genBlock).not.toContain("Markdown link syntax");
+    expect(genBlock).not.toContain("invented quantitative claim");
+    expect(genBlock).not.toContain("missing [[Signature]]");
   });
 
-  it("rejects {{else}} and {{/if}}", () => {
-    expect(genBlock).toContain("forbidden Handlebars {{else}}");
-    expect(genBlock).toContain("forbidden Handlebars {{/if}}");
+  it("shared validator rejects Handlebars {{...}} template syntax", () => {
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("forbidden {{...}} template syntax");
+    expect(spec).toContain("{{");
   });
 
-  it("rejects any {{...}} template variable", () => {
-    expect(genBlock).toContain("forbidden template variable {{...}}");
+  it("shared validator rejects {%...%} template syntax", () => {
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("forbidden {%...%} template syntax");
   });
 
-  it("rejects {%...%} template syntax", () => {
-    expect(genBlock).toContain("forbidden template syntax {%...%}");
+  it("shared validator rejects %signature% Smartlead syntax", () => {
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("Smartlead %signature%");
+    expect(spec).toContain("use [[Signature]]");
   });
 
-  it("rejects %signature% Smartlead syntax", () => {
-    expect(genBlock).toContain("Smartlead %signature% syntax");
-    expect(genBlock).toContain("use [[Signature]] instead");
+  it("shared validator rejects unknown [[...]] tokens", () => {
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("unknown token");
+    expect(spec).toContain("DRAFT_ALLOWED_TOKENS");
   });
 
-  it("rejects unknown [[...]] tokens", () => {
-    expect(genBlock).toContain("unknown token");
-    expect(genBlock).toContain("ALLOWED_TOKENS");
-    expect(genBlock).toContain('["[[First name]]", "[[Organization]]", "[[Signature]]"]');
+  it("shared validator rejects Markdown [text](url) links in body", () => {
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("Markdown link [text](url)");
   });
 
-  it("rejects Markdown [text](url) links in body", () => {
-    expect(genBlock).toContain("Markdown link syntax");
-    expect(genBlock).toContain("use <a href=");
+  it("shared validator rejects invented quantitative social-proof claims", () => {
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("quantitative social-proof claim");
+    expect(spec).toContain("organizations");
+    expect(spec).toContain("customers");
   });
 
-  it("rejects invented quantitative social-proof claims", () => {
-    expect(genBlock).toContain("invented quantitative claim");
-    expect(genBlock).toContain("organizations");
-    expect(genBlock).toContain("customers");
+  it("shared validator requires [[Signature]] at end of body", () => {
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("missing [[Signature]]");
+    expect(spec).toContain("exactly one required");
+    expect(spec).toContain("[[Signature]] must be in the exact final");
   });
 
-  it("requires exactly one [[Signature]] at end of body", () => {
-    expect(genBlock).toContain("missing [[Signature]] at end");
-    expect(genBlock).toContain("exactly one is required");
-    expect(genBlock).toContain("content after [[Signature]]");
+  it("shared validator validates HTML against email-safe allowlist", () => {
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("BODY_SAFE_TAGS");
+    expect(spec).toContain("unsupported HTML tag");
   });
 
-  it("validates HTML against email-safe allowlist (p, br, a, strong, b, em, i)", () => {
-    expect(genBlock).toContain("SAFE_TAGS");
-    expect(genBlock).toContain("unsupported HTML tag");
-  });
-
-  it("rejects script/style/iframe/event-handler/javascript URL (unchanged)", () => {
-    expect(genBlock).toContain("containsUnsafeHtml");
+  it("shared validator rejects script/style/iframe/event-handler/javascript URL", () => {
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain("<script");
+    expect(spec).toContain("<style");
+    expect(spec).toContain("<iframe");
+    expect(spec).toContain("javascript");
   });
 
   // ── Validation accepts valid content ──
 
   it("allows supported tokens [[First name]], [[Organization]], [[Signature]] in body", () => {
-    // The ALLOWED_TOKENS set contains all three
-    expect(genBlock).toContain('"[[First name]]"');
-    expect(genBlock).toContain('"[[Organization]]"');
-    expect(genBlock).toContain('"[[Signature]]"');
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain('"[[First name]]"');
+    expect(spec).toContain('"[[Organization]]"');
+    expect(spec).toContain('"[[Signature]]"');
   });
 
-  it("allows safe HTML tags: p, br, a, strong, b, em, i", () => {
-    expect(genBlock).toContain('"p", "br", "a", "strong", "b", "em", "i"');
+  it("allows safe HTML tags: p, br, strong, b, em, i", () => {
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    expect(spec).toContain('"p", "br", "strong", "b", "em", "i"');
   });
 
   it("delay_days validation scoped to sequence (does not reject legitimate delays)", () => {
-    // delay_days validation uses AUDIENCE_DRAFT_MAX_DELAY (90), not a content regex
-    expect(genBlock).toContain("AUDIENCE_DRAFT_MAX_DELAY");
+    const spec = read("supabase/functions/_shared/audience-spec.ts");
+    // delay_days validation checks integer + range, not a content regex
+    expect(spec).toContain("delay_days must be an integer");
     // The quantitative claim regex looks for number+organizations/customers, NOT bare numbers
-    expect(genBlock).toMatch(/\\d\[\\d,\]\*\\\+\?\\s\*\(\?:healthcare/);
+    expect(spec).toMatch(/\\d\[\\d,\]\*\\\+\?\\s\*\(\?:healthcare/);
   });
 
   // ── Exact bad output adversarial cases ──

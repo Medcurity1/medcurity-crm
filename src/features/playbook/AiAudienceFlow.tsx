@@ -473,7 +473,7 @@ export function AiAudienceFlow({ onComplete, onBack }: AiAudienceFlowProps) {
         {/* Source label */}
         <div className="rounded-lg border px-3 py-2 text-[11px] text-muted-foreground" style={{ borderColor: "var(--camp-line)", background: "var(--camp-surface-2)" }}>
           <span className="font-medium text-foreground">Source:</span> Pulse CRM only. No external data providers.
-          {interpretation && <> Interpreted by AI model <code className="text-[10px]">{interpretation.model_id}</code>.</>}
+          {interpretation && <> Interpreted by Pulse AI.</>}
         </div>
 
         <div className="flex justify-between pt-1">

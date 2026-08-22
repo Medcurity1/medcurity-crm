@@ -58,6 +58,8 @@ import {
   canonicalizeStateCode,
   PRIVACY_SCREEN_VERSION,
   isStagingProject,
+  validateAudienceDraft,
+  type AudienceDraftPayload,
 } from "../_shared/audience-spec.ts";
 
 const corsHeaders = {
@@ -1233,23 +1235,6 @@ const AUDIENCE_DRAFT_MAX_DESC = 2500;
 const AUDIENCE_DRAFT_MIN_DESC = 20;
 const AUDIENCE_DRAFT_REQUIRED_EMAILS = 3;
 
-/** Reject unsafe HTML patterns in AI-generated email content. */
-function containsUnsafeHtml(html: string): boolean {
-  const lower = html.toLowerCase();
-  if (/<script[\s>]/i.test(lower)) return true;
-  if (/<style[\s>]/i.test(lower)) return true;
-  if (/<iframe[\s>]/i.test(lower)) return true;
-  if (/\bon\w+\s*=/i.test(html)) return true; // event handlers (onclick, onerror, etc.)
-  if (/javascript\s*:/i.test(html)) return true;
-  if (/data\s*:\s*text\/html/i.test(html)) return true;
-  return false;
-}
-
-const AUDIENCE_DRAFT_MAX_SUBJECT = 200;
-const AUDIENCE_DRAFT_MAX_BODY = 10000;
-const AUDIENCE_DRAFT_MAX_NAME = 200;
-const AUDIENCE_DRAFT_MAX_DELAY = 90;
-
 async function generateAudienceDraft(description: string): Promise<Record<string, unknown>> {
   if (!description || typeof description !== "string") {
     throw new AudienceActionError("description is required", 400);
@@ -1280,105 +1265,13 @@ async function generateAudienceDraft(description: string): Promise<Record<string
   });
   const parsed = parseJsonResponse(text);
 
-  // ── Strict output validation ──────────────────────────────────────
-  // Must produce exactly 3 emails with all required fields in safe ranges,
-  // using only approved tokens and email-safe HTML.
-
-  // campaign_name / target_audience
-  if (typeof parsed.campaign_name !== "string" || !parsed.campaign_name.trim()) {
-    throw new AudienceActionError("AI returned empty campaign_name", 422);
-  }
-  if (parsed.campaign_name.length > AUDIENCE_DRAFT_MAX_NAME) {
-    throw new AudienceActionError(`AI returned campaign_name exceeding ${AUDIENCE_DRAFT_MAX_NAME} characters`, 422);
-  }
-  if (typeof parsed.target_audience !== "string" || !parsed.target_audience.trim()) {
-    throw new AudienceActionError("AI returned empty target_audience", 422);
-  }
-  if (parsed.target_audience.length > AUDIENCE_DRAFT_MAX_NAME) {
-    throw new AudienceActionError(`AI returned target_audience exceeding ${AUDIENCE_DRAFT_MAX_NAME} characters`, 422);
-  }
-
-  // sequence
-  if (!Array.isArray(parsed.sequence)) {
-    throw new AudienceActionError("AI returned invalid campaign structure", 422);
-  }
-  if (parsed.sequence.length !== AUDIENCE_DRAFT_REQUIRED_EMAILS) {
-    throw new AudienceActionError(`AI must produce exactly ${AUDIENCE_DRAFT_REQUIRED_EMAILS} emails, got ${parsed.sequence.length}`, 422);
-  }
-  for (let i = 0; i < parsed.sequence.length; i++) {
-    const email = parsed.sequence[i] as Record<string, unknown>;
-    const n = i + 1;
-
-    // seq_number must be exactly 1, 2, 3
-    if (email.seq_number !== n) throw new AudienceActionError(`Email ${n} must have seq_number ${n}, got ${email.seq_number}`, 422);
-
-    // delay_days: integer in safe range
-    if (typeof email.delay_days !== "number" || !Number.isInteger(email.delay_days)) throw new AudienceActionError(`Email ${n} delay_days must be an integer`, 422);
-    if (email.delay_days < 0 || email.delay_days > AUDIENCE_DRAFT_MAX_DELAY) throw new AudienceActionError(`Email ${n} delay_days out of range (0-${AUDIENCE_DRAFT_MAX_DELAY})`, 422);
-
-    // subject: nonempty, bounded
-    if (typeof email.subject !== "string" || !email.subject.trim()) throw new AudienceActionError(`Email ${n} missing subject`, 422);
-    if ((email.subject as string).length > AUDIENCE_DRAFT_MAX_SUBJECT) throw new AudienceActionError(`Email ${n} subject exceeds ${AUDIENCE_DRAFT_MAX_SUBJECT} characters`, 422);
-
-    // body_html: nonempty, bounded
-    if (typeof email.body_html !== "string" || !email.body_html.trim()) throw new AudienceActionError(`Email ${n} missing body`, 422);
-    if ((email.body_html as string).length > AUDIENCE_DRAFT_MAX_BODY) throw new AudienceActionError(`Email ${n} body exceeds ${AUDIENCE_DRAFT_MAX_BODY} characters`, 422);
-
-    const body = email.body_html as string;
-    const subj = email.subject as string;
-
-    // Reject unsafe HTML (script/style/iframe/event-handlers/javascript)
-    if (containsUnsafeHtml(body)) throw new AudienceActionError(`Email ${n} contains unsafe HTML (script/style/iframe/event-handler/javascript URL)`, 422);
-
-    // Require visible text content (not just HTML tags)
-    const visibleText = body.replace(/<[^>]+>/g, "").replace(/&\w+;/g, " ").trim();
-    if (!visibleText) throw new AudienceActionError(`Email ${n} body has no visible text content`, 422);
-
-    // ── Content contract: tokens, HTML, claims ────────────────────
-
-    // Reject Handlebars/Liquid/template syntax in body AND subject
-    const combined = body + subj;
-    if (/\{\{#if\b/.test(combined)) throw new AudienceActionError(`Email ${n} contains forbidden Handlebars conditional {{#if}}`, 422);
-    if (/\{\{else\}\}/.test(combined)) throw new AudienceActionError(`Email ${n} contains forbidden Handlebars {{else}}`, 422);
-    if (/\{\{\/if\}\}/.test(combined)) throw new AudienceActionError(`Email ${n} contains forbidden Handlebars {{/if}}`, 422);
-    if (/\{%/.test(combined)) throw new AudienceActionError(`Email ${n} contains forbidden template syntax {%...%}`, 422);
-    // Reject any {{...}} that isn't one of the approved tokens
-    if (/\{\{[^}]*\}\}/.test(combined)) throw new AudienceActionError(`Email ${n} contains forbidden template variable {{...}}`, 422);
-    // Reject %signature% (Smartlead syntax; use [[Signature]] instead)
-    if (/%signature%/i.test(combined)) throw new AudienceActionError(`Email ${n} contains Smartlead %signature% syntax; use [[Signature]] instead`, 422);
-
-    // Reject unknown [[...]] tokens — only [[First name]], [[Organization]], [[Signature]] allowed
-    const bracketTokens = combined.match(/\[\[[^\]]+\]\]/g) ?? [];
-    const ALLOWED_TOKENS = new Set(["[[First name]]", "[[Organization]]", "[[Signature]]"]);
-    for (const tok of bracketTokens) {
-      if (!ALLOWED_TOKENS.has(tok)) throw new AudienceActionError(`Email ${n} contains unknown token ${tok}`, 422);
-    }
-
-    // Reject Markdown links [text](url) in body
-    if (/\[[^\]]+\]\(https?:\/\/[^)]+\)/.test(body)) throw new AudienceActionError(`Email ${n} contains Markdown link syntax; use <a href="...">text</a> instead`, 422);
-
-    // Email-safe HTML allowlist: only p, br, a, strong, b, em, i
-    // (consistent with campaign-content.ts SAFE_AUTHORING_TAGS)
-    const SAFE_TAGS = new Set(["p", "br", "a", "strong", "b", "em", "i"]);
-    const htmlTags = body.matchAll(/<\/?\s*([a-z0-9-]+)\b[^>]*>/gi);
-    for (const match of htmlTags) {
-      const tag = match[1].toLowerCase();
-      if (!SAFE_TAGS.has(tag)) throw new AudienceActionError(`Email ${n} contains unsupported HTML tag <${tag}>`, 422);
-    }
-
-    // Require exactly one [[Signature]] at the end of body
-    const sigCount = (body.match(/\[\[Signature\]\]/g) ?? []).length;
-    if (sigCount === 0) throw new AudienceActionError(`Email ${n} is missing [[Signature]] at end`, 422);
-    if (sigCount > 1) throw new AudienceActionError(`Email ${n} has ${sigCount} [[Signature]] tokens; exactly one is required`, 422);
-    // Signature must be at the end (last meaningful content)
-    const afterSig = body.slice(body.lastIndexOf("[[Signature]]") + "[[Signature]]".length);
-    const afterSigText = afterSig.replace(/<[^>]+>/g, "").trim();
-    if (afterSigText) throw new AudienceActionError(`Email ${n} has content after [[Signature]]; signature must be the last element`, 422);
-
-    // Reject invented quantitative social-proof claims in body and subject
-    if (/\d[\d,]*\+?\s*(?:healthcare\s+)?(?:organizations?|customers?|clients?|practices?|hospitals?|providers?)\b/i.test(combined)) {
-      throw new AudienceActionError(`Email ${n} contains an invented quantitative claim (e.g. "1,000+ organizations"); remove specific numbers not in training notes`, 422);
-    }
+  // ── Strict output validation via shared pure validator ──────────
+  const validationErrors = validateAudienceDraft(parsed as AudienceDraftPayload);
+  if (validationErrors.length > 0) {
+    throw new AudienceActionError(
+      `AI output failed content validation: ${validationErrors[0]}`,
+      422,
+    );
   }
 
   // No DB writes, no Smartlead, no enrollment — pure generation only.
