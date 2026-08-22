@@ -1701,11 +1701,11 @@ describe("audience draft content contract (prompt + validation)", () => {
       prompts.indexOf("function audienceDraftGenerateSystem"),
       prompts.indexOf("/** Word-overlap"),
     );
-    expect(promptFn).toContain("selecting content");
+    expect(promptFn).toContain("You select IDs");
     expect(promptFn).toContain("subject_id");
     expect(promptFn).toContain("message_id");
     expect(promptFn).toContain("cta_id");
-    expect(promptFn).toContain("AVAILABLE IDs");
+    expect(promptFn).toContain("theme_id");
     // Must NOT instruct use of Handlebars/Liquid as the intended syntax
     expect(promptFn).not.toMatch(/Use.*Smartlead.*liquid syntax.*\{\{#if/i);
   });
@@ -1715,23 +1715,22 @@ describe("audience draft content contract (prompt + validation)", () => {
       prompts.indexOf("function audienceDraftGenerateSystem"),
       prompts.indexOf("/** Word-overlap"),
     );
-    // Model selects IDs, does not write any copy
-    expect(promptFn).toContain("Do NOT write any prose");
-    expect(promptFn).toContain("Only select IDs");
-    expect(promptFn).toContain("no HTML");
-    expect(promptFn).toContain("no claims");
+    // Model selects IDs, does not write any text
+    expect(promptFn).toContain("You do NOT write any text");
+    expect(promptFn).toContain("ONLY select IDs");
+    expect(promptFn).toContain("No prose");
   });
 
-  it("prompt has no-claims rule via label constraints", () => {
+  it("prompt has no-prose rule: model outputs only IDs, no authored text", () => {
     const promptFn = prompts.slice(
       prompts.indexOf("function audienceDraftGenerateSystem"),
       prompts.indexOf("/** Word-overlap"),
     );
-    // campaign_name/target_audience are the only model-authored text; prompt constrains them
-    expect(promptFn).toContain("no claims");
-    expect(promptFn).toContain("no statistics");
-    expect(promptFn).toContain("plain-text labels only");
-    expect(promptFn).toContain("Do NOT write any prose");
+    // Model picks theme_id (server derives campaign_name); no model-authored prose at all
+    expect(promptFn).toContain("theme_id");
+    expect(promptFn).toContain("You do NOT write any text");
+    expect(promptFn).toContain("ONLY select IDs");
+    expect(promptFn).toContain("server renders everything");
   });
 
   // ── Validation rejects exact bad patterns (now in shared validator) ──

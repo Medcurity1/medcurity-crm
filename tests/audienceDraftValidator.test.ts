@@ -517,11 +517,11 @@ describe("UX: generation error/retry in CampaignWizard", () => {
 
 describe("renderAudienceDraftEmail (server rendering)", () => {
   it("produces greeting + body paragraphs + CTA + signature", () => {
-    const result = renderAudienceDraftEmail("intro_hipaa_help", "intro_general_hipaa", "reply_to_schedule");
+    const result = renderAudienceDraftEmail("intro_reaching_out", "intro_general", "reply_to_schedule");
     const html = result.body_html;
     expect(html).toContain("<p>Hi [[First name]],</p>");
     // Body paragraphs come from MESSAGE_MAP
-    for (const para of MESSAGE_MAP.intro_general_hipaa.paragraphs) {
+    for (const para of MESSAGE_MAP.intro_general.paragraphs) {
       expect(html).toContain(`<p>${para}</p>`);
     }
     // CTA from CTA_MAP
@@ -532,25 +532,25 @@ describe("renderAudienceDraftEmail (server rendering)", () => {
   });
 
   it("server-owned message content is used verbatim", () => {
-    const result = renderAudienceDraftEmail("intro_sra_overview", "intro_sra_focused", "visit_medcurity");
+    const result = renderAudienceDraftEmail("intro_quick_question", "intro_sra", "visit_medcurity");
     const html = result.body_html;
     // Body paragraphs from MESSAGE_MAP are rendered verbatim (server-owned, no escaping needed)
-    for (const para of MESSAGE_MAP.intro_sra_focused.paragraphs) {
+    for (const para of MESSAGE_MAP.intro_sra.paragraphs) {
       expect(html).toContain(`<p>${para}</p>`);
     }
     // Subject from SUBJECT_MAP is returned verbatim
-    expect(result.subject).toBe(SUBJECT_MAP.intro_sra_overview.text);
+    expect(result.subject).toBe(SUBJECT_MAP.intro_quick_question.text);
   });
 
   it("falls back to default CTA for unknown key", () => {
-    const result = renderAudienceDraftEmail("intro_hipaa_help", "intro_general_hipaa", "nonexistent_cta");
+    const result = renderAudienceDraftEmail("intro_reaching_out", "intro_general", "nonexistent_cta");
     expect(result.body_html).toContain(CTA_MAP.reply_to_learn_more);
   });
 
   it("server-rendered HTML passes the validator", () => {
-    const e1 = renderAudienceDraftEmail("intro_compliance_support", "intro_general_hipaa", "book_a_demo");
-    const e2 = renderAudienceDraftEmail("followup_checking_in", "followup_value_add", "reply_to_schedule");
-    const e3 = renderAudienceDraftEmail("close_final_thought", "close_soft_ask", "visit_medcurity");
+    const e1 = renderAudienceDraftEmail("intro_compliance_note", "intro_general", "book_a_demo");
+    const e2 = renderAudienceDraftEmail("followup_checking_in", "followup_checking", "reply_to_schedule");
+    const e3 = renderAudienceDraftEmail("close_closing_loop", "close_loop", "visit_medcurity");
     const payload: AudienceDraftPayload = {
       campaign_name: "HIPAA Outreach",
       target_audience: "Hospitals in MN",
@@ -809,12 +809,12 @@ describe("ID-only schema: no model prose in output", () => {
     }
   });
   it("renderAudienceDraftEmail returns subject from SUBJECT_MAP, not model text", () => {
-    const result = renderAudienceDraftEmail("intro_quick_question", "intro_compliance_tools", "book_a_demo");
+    const result = renderAudienceDraftEmail("intro_quick_question", "intro_tools", "book_a_demo");
     expect(result.subject).toBe(SUBJECT_MAP.intro_quick_question.text);
   });
   it("renderAudienceDraftEmail returns body from MESSAGE_MAP, not model text", () => {
-    const result = renderAudienceDraftEmail("followup_checking_in", "followup_gentle_reminder", "reply_to_schedule");
-    for (const para of MESSAGE_MAP.followup_gentle_reminder.paragraphs) {
+    const result = renderAudienceDraftEmail("followup_checking_in", "followup_redirect", "reply_to_schedule");
+    for (const para of MESSAGE_MAP.followup_redirect.paragraphs) {
       expect(result.body_html).toContain(`<p>${para}</p>`);
     }
   });
@@ -823,7 +823,7 @@ describe("ID-only schema: no model prose in output", () => {
     expect(prompt).toContain("subject_id");
     expect(prompt).toContain("message_id");
     expect(prompt).toContain("cta_id");
-    expect(prompt).toContain("You do NOT write any copy");
+    expect(prompt).toContain("You do NOT write any text");
     expect(prompt).not.toContain("body_paragraphs");
     expect(prompt).not.toContain("body_html");
   });
@@ -876,5 +876,179 @@ describe("validateSafeLabel (behavioral)", () => {
   });
   it("rejects stray delimiters", () => {
     expect(validateSafeLabel("test [[ stuff", "test")).toContain("template");
+  });
+});
+
+// ── Exhaustive combination tests ──────────────────────────────────────
+
+import { THEME_MAP, THEME_IDS, AUDIENCE_LABEL } from "../supabase/functions/_shared/playbook-prompts";
+
+describe("exhaustive: every theme/subject/message/CTA combination renders and validates", () => {
+  // For each position, get compatible subject and message IDs
+  const pos1Subjects = SUBJECT_IDS.filter((id) => SUBJECT_MAP[id].position === 1);
+  const pos2Subjects = SUBJECT_IDS.filter((id) => SUBJECT_MAP[id].position === 2);
+  const pos3Subjects = SUBJECT_IDS.filter((id) => SUBJECT_MAP[id].position === 3);
+  const pos1Messages = MESSAGE_IDS.filter((id) => MESSAGE_MAP[id].position === 1);
+  const pos2Messages = MESSAGE_IDS.filter((id) => MESSAGE_MAP[id].position === 2);
+  const pos3Messages = MESSAGE_IDS.filter((id) => MESSAGE_MAP[id].position === 3);
+
+  // Test every allowed combination for each position x CTA
+  for (const themeId of THEME_IDS) {
+    for (const s1 of pos1Subjects) {
+      for (const m1 of pos1Messages) {
+        for (const ctaId of CTA_IDS) {
+          const label = `theme=${themeId} s=${s1} m=${m1} cta=${ctaId}`;
+          it(`position 1: ${label} renders and validates`, () => {
+            const e1 = renderAudienceDraftEmail(s1, m1, ctaId);
+            // Use arbitrary valid pos2/pos3 to complete the 3-email sequence
+            const e2 = renderAudienceDraftEmail(pos2Subjects[0], pos2Messages[0], "reply_to_learn_more");
+            const e3 = renderAudienceDraftEmail(pos3Subjects[0], pos3Messages[0], "visit_medcurity");
+            const payload: AudienceDraftPayload = {
+              campaign_name: THEME_MAP[themeId],
+              target_audience: AUDIENCE_LABEL,
+              sequence: [
+                { seq_number: 1, delay_days: 0, subject: e1.subject, body_html: e1.body_html },
+                { seq_number: 2, delay_days: 3, subject: e2.subject, body_html: e2.body_html },
+                { seq_number: 3, delay_days: 4, subject: e3.subject, body_html: e3.body_html },
+              ],
+            };
+            expect(validateAudienceDraft(payload)).toEqual([]);
+          });
+        }
+      }
+    }
+  }
+
+  for (const s2 of pos2Subjects) {
+    for (const m2 of pos2Messages) {
+      for (const ctaId of CTA_IDS) {
+        it(`position 2: s=${s2} m=${m2} cta=${ctaId} renders and validates`, () => {
+          const e1 = renderAudienceDraftEmail(pos1Subjects[0], pos1Messages[0], "reply_to_schedule");
+          const e2 = renderAudienceDraftEmail(s2, m2, ctaId);
+          const e3 = renderAudienceDraftEmail(pos3Subjects[0], pos3Messages[0], "visit_medcurity");
+          const payload: AudienceDraftPayload = {
+            campaign_name: THEME_MAP[THEME_IDS[0]],
+            target_audience: AUDIENCE_LABEL,
+            sequence: [
+              { seq_number: 1, delay_days: 0, subject: e1.subject, body_html: e1.body_html },
+              { seq_number: 2, delay_days: 3, subject: e2.subject, body_html: e2.body_html },
+              { seq_number: 3, delay_days: 4, subject: e3.subject, body_html: e3.body_html },
+            ],
+          };
+          expect(validateAudienceDraft(payload)).toEqual([]);
+        });
+      }
+    }
+  }
+
+  for (const s3 of pos3Subjects) {
+    for (const m3 of pos3Messages) {
+      for (const ctaId of CTA_IDS) {
+        it(`position 3: s=${s3} m=${m3} cta=${ctaId} renders and validates`, () => {
+          const e1 = renderAudienceDraftEmail(pos1Subjects[0], pos1Messages[0], "reply_to_schedule");
+          const e2 = renderAudienceDraftEmail(pos2Subjects[0], pos2Messages[0], "visit_medcurity");
+          const e3 = renderAudienceDraftEmail(s3, m3, ctaId);
+          const payload: AudienceDraftPayload = {
+            campaign_name: THEME_MAP[THEME_IDS[0]],
+            target_audience: AUDIENCE_LABEL,
+            sequence: [
+              { seq_number: 1, delay_days: 0, subject: e1.subject, body_html: e1.body_html },
+              { seq_number: 2, delay_days: 3, subject: e2.subject, body_html: e2.body_html },
+              { seq_number: 3, delay_days: 4, subject: e3.subject, body_html: e3.body_html },
+            ],
+          };
+          expect(validateAudienceDraft(payload)).toEqual([]);
+        });
+      }
+    }
+  }
+});
+
+describe("exhaustive: no server-owned content contains forbidden patterns", () => {
+  const claimPatterns = [
+    /\d[\d,]*\+?\s*(?:organizations|customers|clients|hospitals|providers)/i,
+    /\d+\s*%/,
+    /\b(?:guarantee|certified|proven|award|#1|best.in.class|ensures?\s+compliance|fully?\s+compliant)\b/i,
+    /\b(?:act\s+now|limited\s+time|urgent|deadline)\b/i,
+    /\b(?:designed to make|so nothing gets missed|all in one place|many organizations we speak with)\b/i,
+    /https?:\/\//i,
+    /\{\{|\{%|%signature%|\$\{/i,
+  ];
+
+  for (const [id, entry] of Object.entries(SUBJECT_MAP)) {
+    it(`SUBJECT ${id} is claim-free and token-free`, () => {
+      for (const pat of claimPatterns) {
+        expect(pat.test(entry.text), `${id} matched ${pat}`).toBe(false);
+      }
+      // No [[...]] tokens in subjects
+      expect(/\[\[/.test(entry.text)).toBe(false);
+    });
+  }
+
+  for (const [id, entry] of Object.entries(MESSAGE_MAP)) {
+    for (let pi = 0; pi < entry.paragraphs.length; pi++) {
+      it(`MESSAGE ${id} para ${pi} is claim-free`, () => {
+        const para = entry.paragraphs[pi];
+        for (const pat of claimPatterns) {
+          expect(pat.test(para), `${id}[${pi}] matched ${pat}`).toBe(false);
+        }
+      });
+    }
+  }
+
+  for (const [id, text] of Object.entries(CTA_MAP)) {
+    it(`CTA ${id} is claim-free`, () => {
+      for (const pat of claimPatterns) {
+        expect(pat.test(text), `CTA ${id} matched ${pat}`).toBe(false);
+      }
+    });
+  }
+
+  for (const [id, name] of Object.entries(THEME_MAP)) {
+    it(`THEME ${id} label is claim-free plain text`, () => {
+      for (const pat of claimPatterns) {
+        expect(pat.test(name), `THEME ${id} matched ${pat}`).toBe(false);
+      }
+      expect(validateSafeLabel(name, "theme")).toBeNull();
+    });
+  }
+});
+
+describe("generator source consumes no model-authored visible string", () => {
+  it("schema has no campaign_name/target_audience/body_paragraphs/subject/body_html from model", () => {
+    const edgeFn = read("supabase/functions/playbook-ai/index.ts");
+    const fn = edgeFn.slice(
+      edgeFn.indexOf("async function generateAudienceDraft"),
+      edgeFn.indexOf("// ── HTTP handler"),
+    );
+    // campaign_name comes from THEME_MAP, not model
+    expect(fn).toContain("THEME_MAP[themeId]");
+    // target_audience is a fixed constant
+    expect(fn).toContain("AUDIENCE_LABEL");
+    // subjects come from SUBJECT_MAP via renderAudienceDraftEmail
+    expect(fn).toContain("rendered.subject");
+    // bodies come from renderAudienceDraftEmail
+    expect(fn).toContain("rendered.body_html");
+    // No model-provided string used as visible content
+    expect(fn).not.toContain("parsed.campaign_name");
+    expect(fn).not.toContain("parsed.target_audience");
+    // No model text used directly — only IDs that index into server maps
+    expect(fn).not.toContain("parsed.subject");
+    expect(fn).not.toMatch(/raw\.subject[^_]/); // raw.subject_id is OK, raw.subject is not
+    expect(fn).not.toContain("body_paragraphs");
+  });
+
+  it("prompt schema output is IDs and delays only", () => {
+    const prompt = audienceDraftGenerateSystem();
+    expect(prompt).toContain("theme_id");
+    expect(prompt).toContain("subject_id");
+    expect(prompt).toContain("message_id");
+    expect(prompt).toContain("cta_id");
+    expect(prompt).toContain("delay_days");
+    // No body_paragraphs, body_html, subject (text), campaign_name, target_audience
+    expect(prompt).not.toContain("body_paragraphs");
+    expect(prompt).not.toContain("body_html");
+    expect(prompt).not.toContain('"campaign_name"');
+    expect(prompt).not.toContain('"target_audience"');
   });
 });

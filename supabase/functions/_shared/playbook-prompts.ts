@@ -284,60 +284,69 @@ Only include filter keys that the user's description calls for. Omit keys with n
 //
 // SECURITY: rep-callable, no admin training notes, no per-tenant data.
 
-/** Server-owned subject lines. Keyed by position (1=intro, 2=followup, 3=close). */
+/** Server-owned campaign themes. Model picks one; server derives campaign_name. */
+export const THEME_MAP: Record<string, string> = {
+  hipaa_intro: "HIPAA Compliance Introduction",
+  sra_conversation: "Security Risk Analysis Conversation",
+  training_conversation: "HIPAA Training Conversation",
+  compliance_tools: "Compliance Tools Overview",
+  general_outreach: "Healthcare Compliance Outreach",
+};
+export const THEME_IDS = Object.keys(THEME_MAP);
+
+/** Fixed target_audience label. The UI shows exact audience provenance separately. */
+export const AUDIENCE_LABEL = "Selected Pulse CRM audience";
+
+/** Server-owned subject lines. No tokens, no claims. Position-aware. */
 export const SUBJECT_MAP: Record<string, { text: string; position: number }> = {
-  intro_hipaa_help:          { text: "HIPAA compliance help for [[Organization]]", position: 1 },
-  intro_compliance_support:  { text: "Compliance support for your organization",   position: 1 },
-  intro_sra_overview:        { text: "Security Risk Analysis for healthcare",       position: 1 },
-  intro_quick_question:      { text: "Quick question about your compliance needs",  position: 1 },
-  followup_checking_in:      { text: "Checking in on compliance",                   position: 2 },
-  followup_still_interested: { text: "Still thinking about HIPAA compliance?",      position: 2 },
-  followup_quick_note:       { text: "A quick note from Medcurity",                 position: 2 },
-  close_final_thought:       { text: "One last thought on compliance",              position: 3 },
-  close_one_more_thing:      { text: "One more way we can help",                    position: 3 },
-  close_last_note:           { text: "Thanks for your time",                        position: 3 },
+  intro_reaching_out:        { text: "Reaching out from Medcurity",                  position: 1 },
+  intro_quick_question:      { text: "Quick question about HIPAA compliance",        position: 1 },
+  intro_compliance_note:     { text: "A note about healthcare compliance",           position: 1 },
+  intro_brief_introduction:  { text: "Brief introduction from Medcurity",            position: 1 },
+  followup_following_up:     { text: "Following up on my earlier note",              position: 2 },
+  followup_checking_in:      { text: "Checking in",                                  position: 2 },
+  followup_quick_note:       { text: "A quick note from Medcurity",                  position: 2 },
+  close_closing_loop:        { text: "Closing the loop",                             position: 3 },
+  close_last_note:           { text: "One last note",                                position: 3 },
+  close_thanks:              { text: "Thanks for your time",                         position: 3 },
 };
 
-/** Server-owned body copy. Each is an array of paragraphs. Position-aware. */
+/** Server-owned body copy. Claim-free, restrained outreach. No tokens. */
 export const MESSAGE_MAP: Record<string, { paragraphs: string[]; position: number }> = {
-  intro_general_hipaa: { position: 1, paragraphs: [
-    "I wanted to reach out because HIPAA compliance is a challenge for many healthcare organizations, and we may be able to help.",
-    "Medcurity offers tools like our Security Risk Analysis and HIPAA training platform that are designed to make the process more manageable for teams of all sizes.",
+  intro_general: { position: 1, paragraphs: [
+    "I am reaching out from Medcurity. We work in the HIPAA compliance space and I would like to learn how your team currently approaches compliance.",
+    "Would you be open to a brief conversation?",
   ]},
-  intro_sra_focused: { position: 1, paragraphs: [
-    "Many healthcare organizations find the HIPAA Security Risk Analysis process complex and time-consuming. Medcurity was built to help with exactly that.",
-    "Our SRA platform walks your team through the process step by step, so nothing gets missed.",
+  intro_sra: { position: 1, paragraphs: [
+    "I am reaching out from Medcurity. We offer a Security Risk Analysis platform for healthcare organizations.",
+    "I would be happy to share more about how it works if that would be useful.",
   ]},
-  intro_academy_focused: { position: 1, paragraphs: [
-    "HIPAA training can be a challenge to coordinate across a healthcare organization. Medcurity Academy was designed to make it straightforward.",
-    "Our training platform covers the topics your team needs, with tracking so you can see who has completed their training.",
+  intro_training: { position: 1, paragraphs: [
+    "I am reaching out from Medcurity. We offer a HIPAA training platform called Medcurity Academy.",
+    "If HIPAA training is on your radar, I would welcome the chance to share more.",
   ]},
-  intro_compliance_tools: { position: 1, paragraphs: [
-    "Keeping up with HIPAA requirements can be overwhelming, especially for growing healthcare organizations.",
-    "Medcurity offers a suite of compliance tools, including our Security Risk Analysis, training platform, and policy management, all in one place.",
+  intro_tools: { position: 1, paragraphs: [
+    "I am reaching out from Medcurity. We offer compliance tools for healthcare organizations, including Security Risk Analysis, training, and policy management.",
+    "I would be glad to share more if any of those areas are relevant to your work.",
   ]},
-  followup_value_add: { position: 2, paragraphs: [
-    "I wanted to follow up on my previous email. Many organizations we speak with appreciate having a structured approach to compliance rather than trying to piece things together on their own.",
-    "If you have any questions about how Medcurity could fit into your workflow, I am happy to walk you through it.",
+  followup_checking: { position: 2, paragraphs: [
+    "I wanted to follow up on my earlier note. I understand compliance is one of many priorities.",
+    "If you have any questions about Medcurity, I am happy to answer them.",
   ]},
-  followup_gentle_reminder: { position: 2, paragraphs: [
-    "I know compliance is just one of many priorities on your plate. I wanted to check in and see if you had a chance to look into Medcurity.",
-    "We are here whenever the timing is right for a conversation.",
+  followup_redirect: { position: 2, paragraphs: [
+    "I wanted to follow up briefly. If someone else at your organization handles HIPAA compliance, I would appreciate being pointed in the right direction.",
   ]},
-  followup_different_angle: { position: 2, paragraphs: [
-    "In addition to our Security Risk Analysis, Medcurity also offers tools for BAA management, vendor management, and policy review.",
-    "Sometimes organizations start with one area and expand from there. Happy to discuss what would be the best fit for your needs.",
+  followup_timing: { position: 2, paragraphs: [
+    "I know the timing may not be right. I just wanted to check in and let you know we are here whenever it makes sense to connect.",
   ]},
-  close_soft_ask: { position: 3, paragraphs: [
-    "I did not want to keep filling your inbox, so this will be my last note for now.",
-    "If HIPAA compliance is something your organization is working on, I would welcome the chance to have a brief conversation about how Medcurity might help.",
+  close_loop: { position: 3, paragraphs: [
+    "I will close the loop for now. If HIPAA compliance comes up in the future, please feel free to reach out.",
   ]},
-  close_summary: { position: 3, paragraphs: [
-    "Just a final note. Medcurity is here to help healthcare organizations approach HIPAA compliance with the right tools and support.",
-    "If now is not the right time, no worries at all. Feel free to reach out whenever it makes sense.",
+  close_appreciate: { position: 3, paragraphs: [
+    "I appreciate your time. If Medcurity can ever be a resource for your organization, do not hesitate to get in touch.",
   ]},
-  close_friendly_close: { position: 3, paragraphs: [
-    "I appreciate your time reading these emails. Compliance is important work, and I hope Medcurity can be a useful resource for [[Organization]] when the time is right.",
+  close_door_open: { position: 3, paragraphs: [
+    "This will be my last note for now. The door is always open if you would like to learn more about what Medcurity offers.",
   ]},
 };
 
@@ -359,38 +368,34 @@ export const CTA_IDS = Object.keys(CTA_MAP);
  * from server-owned allowlists. No model-authored prose.
  */
 export function audienceDraftGenerateSystem(): string {
-  return `You are selecting content for a 3-email outreach sequence for Medcurity, a HIPAA compliance SaaS company. You do NOT write any copy. You select IDs from server-owned allowlists. The server renders all subject lines, body copy, and CTAs from those IDs.
+  return `You select IDs for a 3-email outreach sequence for Medcurity. You do NOT write any text. You ONLY select IDs from the lists below. The server renders everything.
 
-OUTPUT FORMAT (JSON only, no markdown, no preamble):
+OUTPUT (JSON only, no markdown):
 {
-  "campaign_name": "Short plain-text label, max 60 chars",
-  "target_audience": "Short plain-text label, max 60 chars",
+  "theme_id": "hipaa_intro",
   "sequence": [
-    { "seq_number": 1, "delay_days": 0, "subject_id": "intro_hipaa_help", "message_id": "intro_general_hipaa", "cta_id": "reply_to_schedule" },
-    { "seq_number": 2, "delay_days": 3, "subject_id": "followup_checking_in", "message_id": "followup_value_add", "cta_id": "visit_medcurity" },
-    { "seq_number": 3, "delay_days": 4, "subject_id": "close_final_thought", "message_id": "close_soft_ask", "cta_id": "reply_to_learn_more" }
+    { "seq_number": 1, "delay_days": 0, "subject_id": "intro_reaching_out", "message_id": "intro_general", "cta_id": "reply_to_schedule" },
+    { "seq_number": 2, "delay_days": 3, "subject_id": "followup_following_up", "message_id": "followup_checking", "cta_id": "visit_medcurity" },
+    { "seq_number": 3, "delay_days": 4, "subject_id": "close_closing_loop", "message_id": "close_loop", "cta_id": "reply_to_learn_more" }
   ]
 }
 
-AVAILABLE IDs:
+theme_id: ${THEME_IDS.map((id) => `"${id}"`).join(", ")}
 
-subject_id (position 1 = intro, 2 = followup, 3 = close):
+subject_id (position 1=intro, 2=followup, 3=close):
 ${SUBJECT_IDS.map((id) => `  "${id}" (position ${SUBJECT_MAP[id].position})`).join("\n")}
 
-message_id (position 1 = intro, 2 = followup, 3 = close):
+message_id:
 ${MESSAGE_IDS.map((id) => `  "${id}" (position ${MESSAGE_MAP[id].position})`).join("\n")}
 
-cta_id:
-${CTA_IDS.map((id) => `  "${id}"`).join("\n")}
+cta_id: ${CTA_IDS.map((id) => `"${id}"`).join(", ")}
 
 RULES:
-- Exactly 3 emails: seq_number 1, 2, 3.
-- Email 1: delay_days 0, subject_id position 1, message_id position 1.
-- Email 2: delay_days 3 or 4, subject_id position 2, message_id position 2.
-- Email 3: delay_days 3 or 4, subject_id position 3, message_id position 3.
-- campaign_name/target_audience: short plain-text labels only. No URLs, no HTML, no claims, no statistics.
-- Pick IDs that best match the user's audience description.
-- Do NOT write any prose, subjects, or body text. Only select IDs.`;
+- theme_id: pick the best match for the user's audience.
+- Email 1: delay_days 0, position-1 subject_id and message_id.
+- Email 2: delay_days 3 or 4, position-2 IDs.
+- Email 3: delay_days 3 or 4, position-3 IDs.
+- Output ONLY the JSON with IDs and numeric delays. No prose.`;
 }
 
 /**

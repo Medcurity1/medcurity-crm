@@ -28,6 +28,8 @@ import {
   ideasUserPrompt,
   campaignGenerateSystem,
   audienceDraftGenerateSystem,
+  THEME_MAP,
+  AUDIENCE_LABEL,
   SUBJECT_MAP,
   MESSAGE_MAP,
   CTA_MAP,
@@ -63,7 +65,6 @@ import {
   PRIVACY_SCREEN_VERSION,
   isStagingProject,
   validateAudienceDraft,
-  validateSafeLabel,
   type AudienceDraftPayload,
 } from "../_shared/audience-spec.ts";
 
@@ -1276,18 +1277,11 @@ async function generateAudienceDraft(description: string): Promise<Record<string
     throw new AudienceActionError("AI returned non-object response", 422);
   }
 
-  // ── Validate model-provided labels ────────────────────────────
-  if (typeof parsed.campaign_name !== "string" || !parsed.campaign_name.trim()) {
-    throw new AudienceActionError("AI returned empty campaign_name", 422);
+  // ── Validate theme_id (server derives campaign_name) ───────────
+  const themeId = String(parsed.theme_id ?? "");
+  if (!THEME_MAP[themeId]) {
+    throw new AudienceActionError(`Unknown theme_id "${themeId}"`, 422);
   }
-  if (typeof parsed.target_audience !== "string" || !parsed.target_audience.trim()) {
-    throw new AudienceActionError("AI returned empty target_audience", 422);
-  }
-  // Strict safe label validation on model-provided strings
-  const labelErrors = validateSafeLabel(String(parsed.campaign_name), "campaign_name");
-  if (labelErrors) throw new AudienceActionError(labelErrors, 422);
-  const tgtErrors = validateSafeLabel(String(parsed.target_audience), "target_audience");
-  if (tgtErrors) throw new AudienceActionError(tgtErrors, 422);
 
   if (!Array.isArray(parsed.sequence) || parsed.sequence.length !== 3) {
     throw new AudienceActionError("AI must produce exactly 3 emails", 422);
@@ -1327,9 +1321,11 @@ async function generateAudienceDraft(description: string): Promise<Record<string
     });
   }
 
+  // Server derives campaign_name from theme; target_audience is a fixed label
+  // (the UI shows exact audience provenance separately).
   const campaign = {
-    campaign_name: String(parsed.campaign_name).slice(0, 60),
-    target_audience: String(parsed.target_audience).slice(0, 60),
+    campaign_name: THEME_MAP[themeId],
+    target_audience: AUDIENCE_LABEL,
     sequence: renderedSequence,
   };
 
